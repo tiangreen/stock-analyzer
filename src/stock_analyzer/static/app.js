@@ -697,6 +697,7 @@ async function loadStock() {
 
 function selectTicker(ticker) {
   state.ticker = ticker;
+  disarmRemove();
   for (const li of document.querySelectorAll("#watchlist li")) {
     li.classList.toggle("active", li.dataset.ticker === ticker);
   }
@@ -710,12 +711,40 @@ $("analyze").addEventListener("click", async () => {
   refreshStatus();
 });
 
+// Removal is confirmed with a second click on the button itself: embedded browsers and
+// pages with dialogs blocked answer window.confirm() with "no" without ever showing it.
+let removeArmed = null, removeTimer = null;
+function disarmRemove() {
+  clearTimeout(removeTimer);
+  removeArmed = null;
+  $("remove").textContent = "Remove";
+  $("remove").title = "";
+}
+
 $("remove").addEventListener("click", async () => {
-  if (!confirm(`Remove ${state.ticker} and its stored analyses?`)) return;
-  await api(`/api/watchlist/${encodeURIComponent(state.ticker)}`, { method: "DELETE" });
-  state.ticker = null;
-  $("stock").hidden = true; $("empty").hidden = false;
-  refreshWatchlist();
+  const ticker = state.ticker;
+  if (!ticker) return;
+  if (removeArmed !== ticker) {
+    disarmRemove();
+    removeArmed = ticker;
+    $("remove").textContent = "Click again to remove";
+    $("remove").title = `Removes ${ticker} and its stored analyses`;
+    removeTimer = setTimeout(disarmRemove, 4000);
+    return;
+  }
+  disarmRemove();
+  try {
+    await api(`/api/watchlist/${encodeURIComponent(ticker)}`, { method: "DELETE" });
+  } catch (e) {
+    $("s-error").textContent = `Could not remove ${ticker}: ${e.message}`;
+    $("s-error").hidden = false;
+    return;
+  }
+  if (state.ticker === ticker) {
+    state.ticker = null;
+    $("stock").hidden = true; $("empty").hidden = false;
+  }
+  await refreshWatchlist();
 });
 
 // --- accuracy and runs views ------------------------------------------------
