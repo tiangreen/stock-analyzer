@@ -66,9 +66,14 @@ def _history(past: list[dict]) -> str:
 
 
 def build(ticker: str, info: dict, prices: pd.DataFrame, snap: dict, news: list[dict],
-          past: list[dict], horizons: list[int]) -> str:
+          past: list[dict], horizons: list[int], language: str = "English") -> str:
+    """`language` is the English name of the language the model writes its free text in."""
     derived = snap.get("signals", [])
-    values = {k: v for k, v in snap.items() if k != "signals"}
+    values = {k: v for k, v in snap.items() if k not in ("signals", "signal_codes")}
+    wording = "" if language == "English" else f"""
+Write every free-text value (summary, key_signals, risks and the signal's reasoning) in {language}.
+Keep the JSON keys and the fixed values (trend, direction, action) in English exactly as listed.
+"""
     headlines = "\n".join(
         f"- {n.get('date') or '?'} | {n.get('publisher') or '?'} | {n['title']}" for n in news
     ) or "None available."
@@ -121,6 +126,6 @@ Also give the overall trend, a 3-6 sentence summary a retail investor can follow
 driving the view, the main risks, and the nearest support and resistance prices.
 
 {signals.instructions(horizons)}
-
+{wording}
 Answer with one JSON object in exactly this shape and nothing else:
 {json.dumps(example)}"""

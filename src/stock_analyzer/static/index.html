@@ -11,26 +11,29 @@
 <header>
   <h1>Stock Analyzer</h1>
   <nav>
-    <button class="tab active" data-view="stocks">Stocks</button>
-    <button class="tab" data-view="signals">Signals</button>
-    <button class="tab" data-view="accuracy">Accuracy</button>
-    <button class="tab" data-view="runs">Runs</button>
-    <button class="tab" data-view="settings">Settings</button>
+    <button class="tab active" data-view="stocks" data-i18n="tab.stocks">Stocks</button>
+    <button class="tab" data-view="signals" data-i18n="tab.signals">Signals</button>
+    <button class="tab" data-view="accuracy" data-i18n="tab.accuracy">Accuracy</button>
+    <button class="tab" data-view="runs" data-i18n="tab.runs">Runs</button>
+    <button class="tab" data-view="settings" data-i18n="tab.settings">Settings</button>
   </nav>
   <div class="controls">
-    <label>Model
+    <label><span data-i18n="hdr.model">Model</span>
       <select id="provider"></select>
     </label>
     <span id="auth"></span>
-    <label>Currency
+    <label><span data-i18n="hdr.currency">Currency</span>
       <select id="currency"></select>
     </label>
-    <label class="schedule">Daily at
+    <label class="schedule"><span data-i18n="hdr.dailyAt">Daily at</span>
       <input id="sched-time" type="time" step="60">
-      <input id="sched-on" type="checkbox" title="Schedule enabled">
+      <input id="sched-on" type="checkbox" title="Schedule enabled" data-i18n-title="hdr.schedTitle">
     </label>
     <span id="next-run" class="muted"></span>
-    <button id="run-now" class="primary">Run now</button>
+    <button id="run-now" class="primary" data-i18n="run.now">Run now</button>
+    <label data-i18n-title="hdr.languageTitle"><span data-i18n="hdr.language">Language</span>
+      <select id="language"></select>
+    </label>
   </div>
 </header>
 <div id="banner" hidden></div>
@@ -38,15 +41,15 @@
 <main id="view-stocks">
   <aside>
     <form id="add-form">
-      <input id="add-input" placeholder="Name or ticker: Samsung, Toyota, AAPL, SAP.DE" autocomplete="off" spellcheck="false">
-      <button>Add</button>
+      <input id="add-input" placeholder="Name or ticker: Samsung, Toyota, AAPL, SAP.DE" data-i18n-placeholder="add.placeholder" autocomplete="off" spellcheck="false">
+      <button data-i18n="add.button">Add</button>
     </form>
     <ul id="suggestions" hidden></ul>
     <div id="add-error" class="error" hidden></div>
     <ul id="watchlist"></ul>
   </aside>
   <section id="detail">
-    <div id="empty" class="muted">Select a stock from the watchlist.</div>
+    <div id="empty" class="muted" data-i18n="stock.select">Select a stock from the watchlist.</div>
     <div id="stock" hidden>
       <div class="stock-head">
         <div>
@@ -54,9 +57,9 @@
           <div id="s-sub" class="muted"></div>
         </div>
         <div class="stock-actions">
-          <a id="tv-link" class="button" target="_blank" rel="noopener" hidden>Open in TradingView</a>
-          <button id="analyze">Analyze now</button>
-          <button id="remove" class="danger">Remove</button>
+          <a id="tv-link" class="button" target="_blank" rel="noopener" hidden data-i18n="stock.tradingview">Open in TradingView</a>
+          <button id="analyze" data-i18n="stock.analyze">Analyze now</button>
+          <button id="remove" class="danger" data-i18n="stock.remove">Remove</button>
         </div>
       </div>
       <div id="s-error" class="error" hidden></div>
@@ -77,7 +80,7 @@
         <div class="card" id="indicators"></div>
       </div>
       <div class="card">
-        <h3>Forecast history</h3>
+        <h3 data-i18n="history.title">Forecast history</h3>
         <div class="table-wrap"><table id="history"></table></div>
       </div>
     </div>
@@ -89,7 +92,8 @@
 <main id="view-runs" class="single" hidden></main>
 <main id="view-settings" class="single" hidden></main>
 
-<footer>Model output is informational only and is not investment advice. Signals are suggestions to check yourself; this app never places orders. Prices from Yahoo Finance, adjusted for splits and dividends. Charts: TradingView Lightweight Charts™, Copyright (с) 2025 <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView, Inc.</a></footer>
+<footer><span data-i18n="footer.disclaimer">Model output is informational only and is not investment advice. Signals are suggestions to check yourself; this app never places orders. Prices from Yahoo Finance, adjusted for splits and dividends.</span> Charts: TradingView Lightweight Charts™, Copyright (с) 2025 <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView, Inc.</a></footer>
+<script src="/static/i18n.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

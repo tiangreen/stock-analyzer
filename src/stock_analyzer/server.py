@@ -85,6 +85,7 @@ class ScheduleIn(BaseModel):
 class SettingsIn(BaseModel):
     provider: str | None = None
     currency: str | None = None
+    language: str | None = None
 
 
 # --- status and settings --------------------------------------------------
@@ -97,6 +98,8 @@ def status():
         "provider": cfg["provider"],
         "currency": cfg["display_currency"],
         "currencies": list(config.DISPLAY_CURRENCIES),
+        "language": cfg["language"],
+        "languages": list(config.LANGUAGES),
         "providers": {n: {"installed": cls().available(), "model": cfg["models"].get(n) or "default"}
                       for n, cls in PROVIDERS.items()},
         "horizons": cfg["horizons"],
@@ -116,8 +119,13 @@ def put_settings(body: SettingsIn):
         if body.currency.upper() not in config.DISPLAY_CURRENCIES:
             raise HTTPException(400, f"Currency must be one of {config.DISPLAY_CURRENCIES}")
         db.set_setting("display_currency", body.currency.upper())
+    if body.language is not None:
+        if body.language.lower() not in config.LANGUAGES:
+            raise HTTPException(400, f"Language must be one of {tuple(config.LANGUAGES)}")
+        db.set_setting("language", body.language.lower())
     cfg = config.load()
-    return {"provider": cfg["provider"], "currency": cfg["display_currency"]}
+    return {"provider": cfg["provider"], "currency": cfg["display_currency"],
+            "language": cfg["language"]}
 
 
 @app.get("/api/fx")

@@ -81,6 +81,8 @@ def test_snapshot_uptrend_signals_and_json_safe():
     snap = ind.snapshot(ind.compute(df))
     assert snap["close"] == 150
     assert "Price above SMA200" in snap["signals"]
+    assert {"code": "price_above", "label": "SMA200"} in snap["signal_codes"]
+    assert len(snap["signal_codes"]) == len(snap["signals"])
     assert any("overbought" in s for s in snap["signals"])
     assert snap["high_52w"] == 151
     json.dumps(snap, allow_nan=False)

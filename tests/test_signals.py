@@ -104,6 +104,7 @@ def test_buy_against_forecast_becomes_hold():
     out = reviewed(buy(), predictions=down)
     assert out["action"] == "hold"
     assert "5-day forecast points down" in out["checks"][0]
+    assert out["check_codes"][0] == {"code": "forecast_against", "horizon": 5, "direction": "down"}
 
 
 def test_sell_passes_and_drops_exit_prices():

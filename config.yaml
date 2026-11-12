@@ -25,6 +25,10 @@ models:
 # Analysis and forecasts are always done in each stock's own trading currency.
 display_currency: EUR
 
+# Dashboard language: en, de or zh (switchable in the header). New analyses are written in
+# this language too; analyses already stored keep the language they were written in.
+language: en
+
 # Reasoning effort per provider. Empty string = the model's default.
 # Claude: low, medium, high, xhigh, max. Codex: depends on the model (see Settings).
 # Model and effort chosen in the dashboard's Settings tab override these.

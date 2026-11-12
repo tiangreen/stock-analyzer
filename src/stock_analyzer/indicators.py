@@ -134,11 +134,19 @@ def snapshot(ind: pd.DataFrame) -> dict:
         "recent_resistance_20d": _num(recent["high"].max()),
     }
 
+    # Each flag is kept twice: as English text (for the model) and as a code with its
+    # parameters, which the dashboard renders in the selected language.
     signals: list[str] = []
+    codes: list[dict] = []
+
+    def flag(text: str, code: str, **params) -> None:
+        signals.append(text)
+        codes.append({"code": code, **params})
 
     def above(key: str, label: str):
         if values[key] is not None:
-            signals.append(f"Price {'above' if close > values[key] else 'below'} {label}")
+            side = "above" if close > values[key] else "below"
+            flag(f"Price {side} {label}", f"price_{side}", label=label)
 
     above("sma20", "SMA20")
     above("sma50", "SMA50")
@@ -146,33 +154,40 @@ def snapshot(ind: pd.DataFrame) -> dict:
 
     cross = _crossed(ind["sma50"], ind["sma200"], 10)
     if cross:
-        signals.append("Golden cross (SMA50 over SMA200) in last 10 bars" if cross == "up"
-                       else "Death cross (SMA50 under SMA200) in last 10 bars")
+        if cross == "up":
+            flag("Golden cross (SMA50 over SMA200) in last 10 bars", "golden_cross")
+        else:
+            flag("Death cross (SMA50 under SMA200) in last 10 bars", "death_cross")
     cross = _crossed(ind["macd"], ind["macd_signal"], 5)
     if cross:
-        signals.append(f"MACD crossed {'above' if cross == 'up' else 'below'} signal in last 5 bars")
+        side = "above" if cross == "up" else "below"
+        flag(f"MACD crossed {side} signal in last 5 bars", f"macd_cross_{side}")
     elif values["macd_hist"] is not None:
-        signals.append(f"MACD histogram {'positive' if values['macd_hist'] > 0 else 'negative'}")
+        side = "positive" if values["macd_hist"] > 0 else "negative"
+        flag(f"MACD histogram {side}", f"macd_hist_{side}")
 
     r = values["rsi14"]
     if r is not None:
-        zone = "overbought (>70)" if r > 70 else "oversold (<30)" if r < 30 else "neutral"
-        signals.append(f"RSI14 {r:.0f}, {zone}")
+        zone = "overbought" if r > 70 else "oversold" if r < 30 else "neutral"
+        note = {"overbought": " (>70)", "oversold": " (<30)", "neutral": ""}[zone]
+        flag(f"RSI14 {r:.0f}, {zone}{note}", f"rsi_{zone}", value=round(r))
     k = values["stoch_k"]
     if k is not None and (k > 80 or k < 20):
-        signals.append(f"Stochastic %K {k:.0f}, {'overbought' if k > 80 else 'oversold'}")
+        zone = "overbought" if k > 80 else "oversold"
+        flag(f"Stochastic %K {k:.0f}, {zone}", f"stoch_{zone}", value=round(k))
 
     upper, lower = values["bb_upper"], values["bb_lower"]
     if upper is not None and lower is not None and upper > lower:
         pos = (close - lower) / (upper - lower)
         values["bb_position"] = _num(pos, 2)
         if pos > 1:
-            signals.append("Close above upper Bollinger band")
+            flag("Close above upper Bollinger band", "bb_above")
         elif pos < 0:
-            signals.append("Close below lower Bollinger band")
+            flag("Close below lower Bollinger band", "bb_below")
     vr = values["volume_ratio_20d"]
     if vr is not None and vr >= 1.5:
-        signals.append(f"Volume spike, {vr:.1f}x the 20-day average")
+        flag(f"Volume spike, {vr:.1f}x the 20-day average", "volume_spike", ratio=vr)
 
     values["signals"] = signals
+    values["signal_codes"] = codes
     return values

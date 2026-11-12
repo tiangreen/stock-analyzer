@@ -5,7 +5,7 @@ import json
 
 import numpy as np
 
-from . import data, db, indicators, prompt, scoring, signals
+from . import config, data, db, indicators, prompt, scoring, signals
 from .llm import get_provider
 
 MIN_BARS = 60
@@ -44,7 +44,8 @@ def analyze_ticker(ticker: str, provider_name: str, cfg: dict, force: bool = Fal
     model = cfg["models"].get(provider_name, "")
     effort = cfg["efforts"].get(provider_name, "")
     provider = get_provider(provider_name, model, cfg["llm_timeout"], effort)
-    text = prompt.build(ticker, info, prices, snap, news, past, horizons)
+    text = prompt.build(ticker, info, prices, snap, news, past, horizons,
+                        config.LANGUAGES[cfg.get("language", "en")])
     result, raw = provider.analyze(text, prompt.schema(horizons), horizons)
     result["signal"] = signals.review(result["signal"], float(prices["close"].iloc[-1]),
                                       result["predictions"], cfg["signals"])

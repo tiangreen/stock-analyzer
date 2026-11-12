@@ -90,6 +90,11 @@ Good to know:
 
 - **Open in TradingView** opens the selected stock's chart on tradingview.com in your own
   logged-in session (see "TradingView" below).
+- **Language**: the dashboard is available in English, German and Chinese; switch it in the
+  header (default: `language` in `config.yaml`). The model writes the text of new analyses in
+  the selected language; stored analyses keep the language they were written in. Run logs
+  and error messages from the server and the CLIs stay in English. Translations live in
+  `src/stock_analyzer/static/i18n.js`.
 - **Currency**: prices are shown in EUR by default, switchable to USD in the header. Every
   price (watchlist, charts, indicators, forecast targets) is converted from the stock's trading
   currency at the latest exchange rate; the stock header also shows the original price.

@@ -92,13 +92,14 @@ def review(signal: dict | None, close: float, predictions: list[dict], limits: d
 
     action           what the dashboard shows (the proposal, or "hold" if a check failed)
     proposed_action  what the model asked for
-    checks           why a proposal was downgraded (empty if it passed)
+    checks           why a proposal was downgraded (empty if it passed), as English text
+    check_codes      the same reasons as codes with parameters, for the dashboard to translate
     reward_risk      (take_profit - limit) / (limit - stop_loss) for a buy
     position_pct     suggested position size as a share of the portfolio for a buy
     """
     if signal is None:
         return None
-    out = {**signal, "proposed_action": signal["action"], "checks": [],
+    out = {**signal, "proposed_action": signal["action"], "checks": [], "check_codes": [],
            "reward_risk": None, "position_pct": None}
     action = signal["action"]
     if action == "hold":
@@ -106,50 +107,61 @@ def review(signal: dict | None, close: float, predictions: list[dict], limits: d
         return out
 
     problems: list[str] = []
+    codes: list[dict] = []
+
+    def fail(text: str, code: str, **params) -> None:
+        problems.append(text)
+        codes.append({"code": code, **params})
+
     if signal["confidence"] < limits["min_confidence"]:
-        problems.append(f"confidence {signal['confidence']:.0%} is below the "
-                        f"{limits['min_confidence']:.0%} minimum")
+        fail(f"confidence {signal['confidence']:.0%} is below the "
+             f"{limits['min_confidence']:.0%} minimum", "low_confidence",
+             value=round(signal["confidence"] * 100), limit=round(limits["min_confidence"] * 100))
 
     horizon = signal["horizon_days"]
     forecast = next((p for p in predictions if p["horizon_days"] == horizon), None)
     if forecast is None:
-        problems.append("the signal names no valid forecast horizon")
+        fail("the signal names no valid forecast horizon", "no_horizon")
     elif forecast["direction"] == {"buy": "down", "sell": "up"}[action]:
-        problems.append(f"the {horizon}-day forecast points {forecast['direction']}")
+        fail(f"the {horizon}-day forecast points {forecast['direction']}", "forecast_against",
+             horizon=horizon, direction=forecast["direction"])
 
     limit = signal["limit_price"]
     if limit is None:
-        problems.append("no limit price")
+        fail("no limit price", "no_limit")
     else:
         gap = abs(limit / close - 1) * 100
         if gap > limits["max_entry_gap_pct"]:
-            problems.append(f"limit is {gap:.1f}% away from the last close "
-                            f"(maximum {limits['max_entry_gap_pct']:g}%)")
+            fail(f"limit is {gap:.1f}% away from the last close "
+                 f"(maximum {limits['max_entry_gap_pct']:g}%)", "entry_gap",
+                 value=round(gap, 1), limit=limits["max_entry_gap_pct"])
 
     if action == "sell":
         out.update(stop_loss=None, take_profit=None)
     elif limit is not None:
         stop, target = signal["stop_loss"], signal["take_profit"]
         if stop is None or target is None:
-            problems.append("buy without a stop-loss and take-profit")
+            fail("buy without a stop-loss and take-profit", "no_exits")
         elif not stop < limit < target:
-            problems.append("prices are not ordered stop-loss < limit < take-profit")
+            fail("prices are not ordered stop-loss < limit < take-profit", "bad_order")
         else:
             stop_pct = (limit - stop) / limit * 100
             reward_risk = (target - limit) / (limit - stop)
             out["reward_risk"] = round(reward_risk, 2)
             if stop_pct > limits["max_stop_pct"]:
-                problems.append(f"stop-loss is {stop_pct:.1f}% below the limit "
-                                f"(maximum {limits['max_stop_pct']:g}%)")
+                fail(f"stop-loss is {stop_pct:.1f}% below the limit "
+                     f"(maximum {limits['max_stop_pct']:g}%)", "stop_too_far",
+                     value=round(stop_pct, 1), limit=limits["max_stop_pct"])
             if reward_risk < limits["min_reward_risk"]:
-                problems.append(f"reward/risk {reward_risk:.2f} is below the "
-                                f"{limits['min_reward_risk']:g} minimum")
+                fail(f"reward/risk {reward_risk:.2f} is below the "
+                     f"{limits['min_reward_risk']:g} minimum", "low_reward_risk",
+                     value=round(reward_risk, 2), limit=limits["min_reward_risk"])
             # Size so that hitting the stop costs risk_per_trade_pct of the portfolio.
             out["position_pct"] = round(
                 min(limits["max_position_pct"], limits["risk_per_trade_pct"] / stop_pct * 100), 1)
 
     if problems:
-        out.update(action="hold", checks=problems, position_pct=None)
+        out.update(action="hold", checks=problems, check_codes=codes, position_pct=None)
     return out
 
 

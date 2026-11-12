@@ -13,11 +13,14 @@ DB_PATH = DATA_DIR / "analyzer.db"
 
 PROVIDERS = ("claude", "codex")
 DISPLAY_CURRENCIES = ("EUR", "USD")  # first one is the default
+# Dashboard languages (first one is the default) and the name the model is told to write in.
+LANGUAGES = {"en": "English", "de": "German", "zh": "Simplified Chinese"}
 
 DEFAULTS = {
     "watchlist": [],
     "provider": "claude",
     "display_currency": "EUR",
+    "language": "en",
     "models": {"claude": "", "codex": ""},
     "efforts": {"claude": "", "codex": ""},
     "horizons": [1, 5, 20],
@@ -68,6 +71,11 @@ def load() -> dict:
     if str(cfg["display_currency"]).upper() not in DISPLAY_CURRENCIES:
         cfg["display_currency"] = DISPLAY_CURRENCIES[0]
     cfg["display_currency"] = str(cfg["display_currency"]).upper()
+    if saved.get("language") in LANGUAGES:
+        cfg["language"] = saved["language"]
+    cfg["language"] = str(cfg["language"]).lower()
+    if cfg["language"] not in LANGUAGES:
+        cfg["language"] = next(iter(LANGUAGES))
     if "schedule" in saved:
         cfg["schedule"] = _merge(cfg["schedule"], saved["schedule"])
     cfg["horizons"] = sorted({int(h) for h in cfg["horizons"]})

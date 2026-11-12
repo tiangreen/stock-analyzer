@@ -58,6 +58,14 @@ def test_last_known_rate_survives_an_outage(pairs):
     assert fx.rate("KRW", "EUR") == 0.0007
 
 
+def test_language_defaults_to_english_and_can_switch(temp_db):
+    assert config.load()["language"] == "en"
+    db.set_setting("language", "zh")
+    assert config.load()["language"] == "zh"
+    db.set_setting("language", "fr")  # not offered: fall back to the file default
+    assert config.load()["language"] == "en"
+
+
 def test_display_currency_defaults_to_eur_and_can_switch(temp_db):
     assert config.load()["display_currency"] == "EUR"
     db.set_setting("display_currency", "USD")
