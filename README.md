@@ -145,3 +145,9 @@ are delayed for most non-US markets).
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+## License
+
+The code is released under the [MIT License](LICENSE). Dependencies keep their own licenses,
+and market data and model output are not covered by it: see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
