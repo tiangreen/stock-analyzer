@@ -1,0 +1,64 @@
+# Tickers use Yahoo Finance symbols. European listings take an exchange suffix:
+#   .DE Xetra, .PA Paris, .AS Amsterdam, .L London, .MI Milan, .SW Zurich, .ST Stockholm
+# Asian listings use the exchange's numeric code plus a suffix:
+#   .KS Korea KOSPI (005930.KS Samsung), .KQ Korea KOSDAQ, .T Tokyo (7203.T Toyota)
+# The dashboard's add box also searches by company name.
+# This list only seeds an empty database; after that, manage the watchlist in the dashboard.
+watchlist:
+  - AAPL
+  - MSFT
+  - NVDA
+  - SAP.DE
+  - ASML.AS
+  - 005930.KS
+  - 7203.T
+
+# Default model provider: "claude" (Claude Code CLI) or "codex" (Codex CLI, ChatGPT login).
+provider: claude
+
+# Model per provider. Empty string = whatever the CLI defaults to.
+models:
+  claude: ""
+  codex: "gpt-6-sol"   # list what your account offers with: codex debug models
+
+# Currency the dashboard shows prices in: EUR or USD (switchable in the header).
+# Analysis and forecasts are always done in each stock's own trading currency.
+display_currency: EUR
+
+# Reasoning effort per provider. Empty string = the model's default.
+# Claude: low, medium, high, xhigh, max. Codex: depends on the model (see Settings).
+# Model and effort chosen in the dashboard's Settings tab override these.
+efforts:
+  claude: ""
+  codex: ""
+
+# Forecast horizons in trading days.
+horizons: [1, 5, 20]
+
+# Trade signals (buy / sell / hold) for placing orders by hand at your broker. The model
+# proposes a signal; it is shown as "hold" unless it passes every limit below.
+signals:
+  min_confidence: 0.6       # model confidence a buy or sell needs (0-1)
+  max_entry_gap_pct: 3.0    # limit price may be at most this far from the last close
+  min_reward_risk: 1.5      # buy: (take-profit - limit) / (limit - stop-loss) must reach this
+  max_stop_pct: 10.0        # buy: stop-loss may be at most this far below the limit
+  risk_per_trade_pct: 1.0   # buy: size the position so that hitting the stop loses this share of the portfolio
+  max_position_pct: 10.0    # buy: never suggest more than this share of the portfolio in one stock
+  portfolio_value: 0        # optional: your portfolio size, to show position sizes as an amount (0 = show % only)
+  portfolio_currency: EUR
+
+# How much daily history to keep per ticker (yfinance period string).
+history_period: 2y
+
+# Seconds to wait for one model call.
+llm_timeout: 300
+
+# Daily run, fired by the dashboard server while it is running (local time).
+schedule:
+  enabled: true
+  time: "22:30"
+  weekdays_only: true
+
+server:
+  host: 127.0.0.1
+  port: 8765

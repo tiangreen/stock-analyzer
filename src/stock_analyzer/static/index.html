@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock Analyzer</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header>
+  <h1>Stock Analyzer</h1>
+  <nav>
+    <button class="tab active" data-view="stocks">Stocks</button>
+    <button class="tab" data-view="signals">Signals</button>
+    <button class="tab" data-view="accuracy">Accuracy</button>
+    <button class="tab" data-view="runs">Runs</button>
+    <button class="tab" data-view="settings">Settings</button>
+  </nav>
+  <div class="controls">
+    <label>Model
+      <select id="provider"></select>
+    </label>
+    <span id="auth"></span>
+    <label>Currency
+      <select id="currency"></select>
+    </label>
+    <label class="schedule">Daily at
+      <input id="sched-time" type="time" step="60">
+      <input id="sched-on" type="checkbox" title="Schedule enabled">
+    </label>
+    <span id="next-run" class="muted"></span>
+    <button id="run-now" class="primary">Run now</button>
+  </div>
+</header>
+<div id="banner" hidden></div>
+
+<main id="view-stocks">
+  <aside>
+    <form id="add-form">
+      <input id="add-input" placeholder="Name or ticker: Samsung, Toyota, AAPL, SAP.DE" autocomplete="off" spellcheck="false">
+      <button>Add</button>
+    </form>
+    <ul id="suggestions" hidden></ul>
+    <div id="add-error" class="error" hidden></div>
+    <ul id="watchlist"></ul>
+  </aside>
+  <section id="detail">
+    <div id="empty" class="muted">Select a stock from the watchlist.</div>
+    <div id="stock" hidden>
+      <div class="stock-head">
+        <div>
+          <h2 id="s-title"></h2>
+          <div id="s-sub" class="muted"></div>
+        </div>
+        <div class="stock-actions">
+          <a id="tv-link" class="button" target="_blank" rel="noopener" hidden>Open in TradingView</a>
+          <button id="analyze">Analyze now</button>
+          <button id="remove" class="danger">Remove</button>
+        </div>
+      </div>
+      <div id="s-error" class="error" hidden></div>
+      <div class="legend">
+        <span><i style="background:#f5a524"></i>SMA20</span>
+        <span><i style="background:#4c9aff"></i>SMA50</span>
+        <span><i style="background:#b388ff"></i>SMA200</span>
+        <span><i style="background:#6b7a90"></i>Bollinger</span>
+      </div>
+      <div id="chart-price" class="chart"></div>
+      <div class="chart-label">RSI 14</div>
+      <div id="chart-rsi" class="chart small"></div>
+      <div class="chart-label">MACD 12 / 26 / 9</div>
+      <div id="chart-macd" class="chart small"></div>
+
+      <div class="grid">
+        <div class="card" id="analysis"></div>
+        <div class="card" id="indicators"></div>
+      </div>
+      <div class="card">
+        <h3>Forecast history</h3>
+        <div class="table-wrap"><table id="history"></table></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<main id="view-signals" class="single" hidden></main>
+<main id="view-accuracy" class="single" hidden></main>
+<main id="view-runs" class="single" hidden></main>
+<main id="view-settings" class="single" hidden></main>
+
+<footer>Model output is informational only and is not investment advice. Signals are suggestions to check yourself; this app never places orders. Prices from Yahoo Finance, adjusted for splits and dividends.</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
