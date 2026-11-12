@@ -133,3 +133,25 @@ def test_login_url_extraction():
 
     line = ANSI_RE.sub("", "\x1b[1mVisit: https://auth.example.com/oauth/authorize?client_id=a&state=b\x1b[0m now")
     assert URL_RE.search(line).group(0) == "https://auth.example.com/oauth/authorize?client_id=a&state=b"
+
+
+def test_which_skips_windows_drives_under_wsl(tmp_path, monkeypatch):
+    from stock_analyzer.llm import base
+
+    seen = {}
+
+    def fake_which(executable, path=None):
+        seen["path"] = path
+        return "/found"
+
+    monkeypatch.setattr(base.shutil, "which", fake_which)
+    monkeypatch.setenv("PATH", base.os.pathsep.join(
+        ["/usr/bin", "/mnt/c/Users/me/AppData/Roaming/npm", "/mnt/data/bin", "/mnt/g"]))
+
+    monkeypatch.setattr(base, "is_wsl", lambda: True)
+    assert base.which("claude") == "/found"
+    assert seen["path"] == base.os.pathsep.join(["/usr/bin", "/mnt/data/bin"])
+
+    monkeypatch.setattr(base, "is_wsl", lambda: False)
+    base.which("claude")
+    assert seen["path"] is None  # everywhere else: the unchanged PATH

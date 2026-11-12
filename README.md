@@ -24,11 +24,59 @@ provider's page and never pass through this app.
 
 ## Start
 
+Windows (PowerShell):
+
 ```powershell
 .\run.ps1
 ```
 
-Then open http://127.0.0.1:8765. The first start creates `.venv` and installs dependencies.
+Linux or WSL2:
+
+```bash
+./run.sh
+```
+
+Then open http://127.0.0.1:8765. The first start creates the virtual environment and installs
+dependencies.
+
+### WSL2
+
+The app runs in WSL2 from the same checkout as on Windows (for example
+`/mnt/g/Projects/stock-analyzer`), and the dashboard opens in the Windows browser at the same
+address, because WSL2 forwards `localhost`. Tested on Ubuntu 26.04 with Python 3.14.
+
+One-time setup inside WSL:
+
+1. Python 3.11 or newer with the venv module: `sudo apt install python3-venv`.
+2. The model CLIs, installed **inside WSL**. WSL puts the Windows `PATH` after its own, so
+   `claude` and `codex` may already resolve to the Windows installs, but those cannot be used
+   from Linux and the app ignores them:
+
+   ```bash
+   npm install -g @anthropic-ai/claude-code @openai/codex
+   ```
+
+   If npm then asks for root, point it at your home directory first
+   (`npm config set prefix ~/.npm-global`); `run.sh` adds `~/.npm-global/bin` and
+   `~/.local/bin` to `PATH` by itself.
+3. Sign in once per CLI (`claude auth login`, `codex login`) or with the dashboard's
+   **Sign in** button. WSL keeps its own logins, separate from the Windows ones. If no browser
+   opens from WSL, use the link the dashboard shows.
+
+Good to know:
+
+- **Where the environment lives**: when the project is on a Windows drive, `run.sh` keeps the
+  Linux environment in `~/.venvs/stock-analyzer`, because `.venv` in the project belongs to
+  Windows and Windows drives are slow from WSL. On a Linux filesystem it uses `.venv`. Set
+  `STOCK_ANALYZER_VENV` to choose another place.
+- **One server at a time**: Windows and WSL share `config.yaml` and `data/analyzer.db` when
+  they use the same checkout. Stop the Windows server before starting the WSL one (and the
+  other way round). Two servers would both fire the daily run, and a server marks an
+  unfinished run as interrupted when it starts. Also, if the Windows server holds port 8765,
+  `localhost:8765` in the Windows browser shows that one, not the WSL server.
+- **Schedule**: the daily run only fires while the WSL distribution is running. WSL shuts an
+  idle distribution down when its last terminal closes, so keep the terminal with `run.sh`
+  open. The time is local time, which WSL takes from Windows.
 
 - **Watchlist**: type a company name or code in the add box and pick from the suggestions, or
   enter a Yahoo Finance symbol directly. US tickers as-is (`AAPL`); other markets take a suffix:
@@ -61,6 +109,13 @@ Run from the command line instead:
 ```powershell
 .\.venv\Scripts\python.exe -m stock_analyzer.runner                      # whole watchlist
 .\.venv\Scripts\python.exe -m stock_analyzer.runner --ticker NVDA --provider codex --force
+```
+
+On Linux or WSL2 the interpreter is `.venv/bin/python`, or `~/.venvs/stock-analyzer/bin/python`
+when the project is on a Windows drive:
+
+```bash
+~/.venvs/stock-analyzer/bin/python -m stock_analyzer.runner --ticker NVDA --provider codex --force
 ```
 
 ## How it works
@@ -136,6 +191,14 @@ are delayed for most non-US markets).
   `.\.venv\Scripts\python.exe -m pip install "pandas==3.0.6"`.
 - **Port 8765 already in use**: another copy of the server is running. Stop it, or change
   `server.port` in `config.yaml`.
+- **WSL: "CLI not installed" although `claude` or `codex` works in the WSL terminal**: the
+  command found is the Windows install (`which claude` shows a path under `/mnt/c/`). Install
+  the CLI inside WSL, see "WSL2" above.
+- **WSL: `No module named 'ensurepip'` or "Python's venv module is missing"**:
+  `sudo apt install python3-venv`.
+- **WSL: `./run.sh` fails with `bad interpreter` or `$'\r': command not found`**: the script
+  was checked out with Windows line endings. `.gitattributes` prevents that for new checkouts;
+  for an existing one run `git add --renormalize . && git checkout -- run.sh`.
 - **No signal on a stock**: analyses made before trade signals existed carry none. Use
   **Analyze now** or **Run now**.
 
@@ -144,6 +207,13 @@ are delayed for most non-US markets).
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m pytest
+```
+
+On Linux or WSL2 (with the interpreter path from above):
+
+```bash
+~/.venvs/stock-analyzer/bin/python -m pip install -e ".[dev]"
+~/.venvs/stock-analyzer/bin/python -m pytest
 ```
 
 ## License

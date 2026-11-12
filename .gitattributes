@@ -1,0 +1,4 @@
+* text=auto
+# Shell scripts must keep LF endings or they fail under WSL/Linux when checked out on Windows.
+*.sh text eol=lf
+*.ps1 text eol=crlf

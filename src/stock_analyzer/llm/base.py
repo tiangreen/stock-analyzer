@@ -62,13 +62,14 @@ class Provider:
                            f"(choose from {', '.join(self.efforts_for(model))})")
 
     def find(self) -> str:
-        path = shutil.which(self.executable)
+        path = which(self.executable)
         if not path:
-            raise LLMError(f"`{self.executable}` CLI not found on PATH. {self.login_hint}")
+            where = " inside WSL (the Windows install cannot be used from Linux)" if is_wsl() else ""
+            raise LLMError(f"`{self.executable}` CLI not found on PATH{where}. {self.login_hint}")
         return path
 
     def available(self) -> bool:
-        return shutil.which(self.executable) is not None
+        return which(self.executable) is not None
 
     def child_env(self) -> dict:
         return dict(os.environ)
@@ -176,6 +177,25 @@ LOGIN_TIMEOUT = 600  # an abandoned sign-in is stopped after this many seconds
 URL_RE = re.compile(r"https://[^\s\"'<>]+")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
 _logins: dict[str, subprocess.Popen] = {}
+WINDOWS_DRIVE_RE = re.compile(r"/mnt/[a-z](/|$)")
+
+
+def is_wsl() -> bool:
+    return os.name == "posix" and "microsoft" in os.uname().release.lower()
+
+
+def which(executable: str) -> str | None:
+    """shutil.which, except that under WSL the Windows drives on PATH are skipped.
+
+    WSL appends the Windows PATH, so `claude` or `codex` can resolve to the Windows npm shim.
+    That starts a Windows program which cannot read the Linux temp paths it is handed and
+    uses the Windows login, so only a CLI installed inside WSL counts.
+    """
+    if not is_wsl():
+        return shutil.which(executable)
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep)
+            if d and not WINDOWS_DRIVE_RE.match(d)]
+    return shutil.which(executable, path=os.pathsep.join(dirs))
 
 
 def _kill(proc: subprocess.Popen) -> None:
