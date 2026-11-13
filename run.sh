@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Starts the dashboard server (which also runs the daily schedule) on Linux and WSL2.
+# ./run.sh stop stops the app that is already running.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -12,6 +13,17 @@ elif [ "$(stat -f -c %T .)" = "v9fs" ]; then
 else
     venv=".venv"
 fi
+
+case "${1:-}" in
+    "") ;;
+    stop|--stop)
+        if [ ! -x "$venv/bin/python" ]; then
+            echo "Stock Analyzer is not installed yet, so it is not running."
+            exit 0
+        fi
+        exec "$venv/bin/python" -m stock_analyzer.server --stop ;;
+    *) echo "Unknown argument '$1'. Use: ./run.sh [stop]" >&2; exit 2 ;;
+esac
 
 if [ ! -x "$venv/bin/python" ]; then
     if ! python3 -c "import ensurepip" 2>/dev/null; then

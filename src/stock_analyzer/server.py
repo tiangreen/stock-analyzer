@@ -1,10 +1,19 @@
 """FastAPI app: JSON API plus the static dashboard."""
 from __future__ import annotations
 
+import argparse
+import json
 import math
+import os
 import re
+import signal
+import socket
+import subprocess
+import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -456,8 +465,100 @@ def index():
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+def _listening(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_closed(host: str, port: int, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not _listening(host, port):
+            return True
+        time.sleep(0.2)
+    return not _listening(host, port)
+
+
+def _listener_pid(port: int) -> int | None:
+    """Process id of whatever listens on the TCP port, from the system's own tools."""
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True,
+                                 timeout=15).stdout
+            for line in out.splitlines():
+                # "TCP  127.0.0.1:8765  0.0.0.0:0  LISTENING  1234". The state word is
+                # translated on a non-English Windows; a listener has no remote port.
+                parts = line.split()
+                if (len(parts) >= 5 and parts[1].endswith(f":{port}")
+                        and parts[2].endswith(":0") and parts[-1].isdigit()):
+                    return int(parts[-1])
+            return None
+        out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True,
+                             text=True, timeout=15).stdout
+        return int(out.split()[0]) if out.split() else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def stop_running() -> int:
+    """Stop the app running at the address in config.yaml (`--stop`, `run.ps1 stop`,
+    `run.sh stop`). Asks it to shut down cleanly; a version from before that existed, or one
+    that does not react, has its process ended instead. Returns the exit code."""
+    server = config.load()["server"]
+    port = int(server["port"])
+    host = "127.0.0.1" if server["host"] in ("0.0.0.0", "::", "") else server["host"]
+    base = f"http://{host}:{port}"
+    try:
+        with urllib.request.urlopen(f"{base}/api/status", timeout=5) as response:
+            status = json.load(response)
+        ours = isinstance(status, dict) and {"providers", "schedule", "horizons"} <= set(status)
+    except (urllib.error.HTTPError, ValueError):
+        ours = False
+    except OSError:
+        print(f"Stock Analyzer is not running (nothing answers at {base}).")
+        return 0
+    if not ours:
+        print(f"Something other than Stock Analyzer answers at {base}; leaving it alone.")
+        return 1
+
+    try:
+        request = urllib.request.Request(f"{base}/api/shutdown", data=b"", method="POST")
+        urllib.request.urlopen(request, timeout=5).close()
+        asked = True
+    except OSError:  # an older version without the endpoint, or it went away meanwhile
+        asked = False
+    if _wait_closed(host, port, 10 if asked else 0.5):
+        print("Stock Analyzer stopped.")
+        return 0
+
+    pid = _listener_pid(port)
+    if pid is None:
+        print(f"Stock Analyzer at {base} did not stop and its process could not be found. "
+              "Press Ctrl+C in the terminal it runs in.")
+        return 1
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as exc:
+        print(f"Could not end the Stock Analyzer process {pid}: {exc}")
+        return 1
+    if _wait_closed(host, port, 10):
+        print(f"Stock Analyzer stopped (process {pid} ended).")
+        return 0
+    print(f"Process {pid} was told to end, but {base} still answers.")
+    return 1
+
+
 def main() -> None:
     import uvicorn
+
+    parser = argparse.ArgumentParser(description="Run the Stock Analyzer dashboard.")
+    parser.add_argument("--stop", action="store_true",
+                        help="stop the app that is already running, instead of starting it")
+    if parser.parse_args().stop:
+        sys.exit(stop_running())
 
     global _server
     server = config.load()["server"]

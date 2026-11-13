@@ -39,8 +39,10 @@ Linux or WSL2:
 Then open http://127.0.0.1:8765. The first start creates the virtual environment and installs
 dependencies.
 
-To stop the app, use **Stop app** in the dashboard's Settings tab (click twice to confirm) or
-press Ctrl+C in the terminal it runs in. The daily schedule only runs while the app does.
+To stop the app, run `.\run.ps1 stop` (Windows) or `./run.sh stop` (Linux, WSL2) from any
+terminal, use **Stop app** in the dashboard's Settings tab (click twice to confirm), or press
+Ctrl+C in the terminal it runs in. The stop command asks the running app to shut down cleanly
+and ends its process if it does not react. The daily schedule only runs while the app does.
 
 ### WSL2
 

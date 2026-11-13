@@ -149,3 +149,45 @@ def test_shutdown_needs_the_apps_own_launcher(monkeypatch):
     with pytest.raises(HTTPException) as refused:
         server.shutdown(_Request(host="127.0.0.1:8765"))
     assert refused.value.status_code == 409
+
+
+def test_stop_command_when_nothing_is_running(monkeypatch, capsys):
+    import socket
+
+    from stock_analyzer import server
+
+    with socket.socket() as probe:  # a port nothing listens on
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setattr(config, "load", lambda: {"server": {"host": "127.0.0.1", "port": port}})
+    assert server.stop_running() == 0
+    assert "not running" in capsys.readouterr().out
+
+
+def test_stop_command_leaves_other_programs_alone(monkeypatch, capsys):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from stock_analyzer import server
+
+    class Other(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"hello": "world"}')
+
+        def log_message(self, *args):
+            pass
+
+    other = HTTPServer(("127.0.0.1", 0), Other)
+    threading.Thread(target=other.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(config, "load", lambda: {"server": {"host": "127.0.0.1",
+                                                                "port": other.server_port}})
+        assert server.stop_running() == 1
+        assert "leaving it alone" in capsys.readouterr().out
+        assert server._listening("127.0.0.1", other.server_port)
+    finally:
+        other.shutdown()
+        other.server_close()
