@@ -804,9 +804,14 @@ async function loadStock() {
 // and no model runs. Polling waits while the page is hidden, and slows to once a minute
 // while the exchange is closed.
 
-const live = { every: 0, timer: null, stock: null, result: null, failed: false, loading: false };
+// Auto-refresh is on by default, every 30 seconds; switching it off (or to 10s) is remembered.
+const LIVE_DEFAULT_EVERY = 30;
+const live = { every: LIVE_DEFAULT_EVERY, timer: null, stock: null, result: null, failed: false, loading: false };
 const LIVE_CLOSED_EVERY = 60;
-try { live.every = [10, 30].includes(+localStorage.getItem("liveEvery")) ? +localStorage.getItem("liveEvery") : 0; } catch {}
+try {
+  const saved = localStorage.getItem("liveEvery");
+  if (saved !== null && [0, 10, 30].includes(+saved)) live.every = +saved;
+} catch {}
 
 function showLive() {
   for (const b of document.querySelectorAll(".live-auto")) {
@@ -848,14 +853,29 @@ async function refreshLive() {
   showLive();
 }
 
+// The bar beside the buttons empties over the wait until the next automatic refresh.
+function countdown(seconds) {
+  const bar = $("live-bar"), fill = bar.firstElementChild;
+  bar.hidden = !seconds;
+  if (!seconds) return;
+  bar.title = t("live.next", { n: seconds });
+  fill.style.transition = "none";
+  fill.style.width = "100%";
+  void fill.offsetWidth;   // apply the full width before the transition starts
+  fill.style.transition = `width ${seconds}s linear`;
+  fill.style.width = "0%";
+}
+
 function scheduleLive() {
   clearTimeout(live.timer);
-  if (!live.every) return;
+  if (!live.every) { countdown(0); return; }
   const closed = live.result && !live.result.open;
+  const seconds = closed ? Math.max(live.every, LIVE_CLOSED_EVERY) : live.every;
+  countdown(seconds);
   live.timer = setTimeout(async () => {
     if (!document.hidden && !$("view-stocks").hidden) await refreshLive();
     scheduleLive();
-  }, (closed ? Math.max(live.every, LIVE_CLOSED_EVERY) : live.every) * 1000);
+  }, seconds * 1000);
 }
 
 $("live-refresh").addEventListener("click", async () => { await refreshLive(); scheduleLive(); });

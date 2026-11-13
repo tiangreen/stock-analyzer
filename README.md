@@ -111,8 +111,9 @@ Good to know:
   and no run has happened yet, it catches up immediately.
 - **Run now** analyzes the whole watchlist; **Analyze now** redoes the selected stock.
 - **Refresh / 10s / 30s** (under the stock's title) fetch the live price of the session in
-  progress, once or automatically every 10 or 30 seconds (click the active button again to
-  stop). The quote and today's forming candle are display only: nothing is stored and no model
+  progress, once or automatically every 10 or 30 seconds. Auto-refresh is on by default at
+  30 seconds, with a bar counting down to the next refresh; click the active button again to
+  stop, and the choice is remembered in the browser. The quote and today's forming candle are display only: nothing is stored and no model
   runs. Auto-refresh waits while the page is hidden and slows down while the exchange is closed.
 - **Realtime** (checkbox beside Analyze now) analyzes the selected stock during its trading
   session: the model also gets the live price, today's bar so far and its 15-minute bars, and

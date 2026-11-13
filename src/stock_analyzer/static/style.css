@@ -84,6 +84,9 @@ td.reason { min-width: 260px; white-space: normal; color: var(--muted); }
 .live-buttons { display: inline-flex; gap: 4px; }
 .live-buttons button { padding: 1px 8px; font-size: 12px; }
 .live-buttons button.active { border-color: var(--accent); color: var(--accent); }
+.live-bar { display: inline-block; width: 90px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.live-bar[hidden] { display: none; }
+.live-bar i { display: block; height: 100%; width: 100%; background: var(--accent); }
 .realtime { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
 
 .stock-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
