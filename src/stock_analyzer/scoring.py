@@ -28,7 +28,8 @@ def grade(prediction: dict, actual_close: float) -> dict:
 
 def score_open(ticker: str | None = None) -> int:
     """Grade every ungraded forecast whose horizon has elapsed in trading bars. Returns count."""
-    sql = "SELECT * FROM predictions WHERE outcome IS NULL"
+    # Realtime forecasts start from a price during the session and are never graded.
+    sql = "SELECT * FROM predictions WHERE outcome IS NULL AND mode = 'daily'"
     params: tuple = ()
     if ticker:
         sql += " AND ticker = ?"
@@ -66,7 +67,8 @@ def accuracy() -> dict:
         "ORDER BY provider, horizon_days")
     by_ticker = db.rows(
         f"SELECT provider, ticker, {select} GROUP BY provider, ticker ORDER BY ticker, provider")
-    pending = db.one("SELECT COUNT(*) AS n FROM predictions WHERE outcome IS NULL")["n"]
+    pending = db.one(
+        "SELECT COUNT(*) AS n FROM predictions WHERE outcome IS NULL AND mode = 'daily'")["n"]
     for row in by_horizon + by_ticker:
         row["hit_rate"] = row["hits"] / row["graded"]
         row["range_rate"] = row["in_range"] / row["graded"]

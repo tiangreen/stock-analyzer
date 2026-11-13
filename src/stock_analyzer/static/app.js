@@ -537,7 +537,8 @@ const flagTexts = (s) => s.signal_codes
   : s.signals;
 
 // Signal card on the stock page. Prices use the open stock's conversion (money()).
-function signalBlock(s, limits) {
+// `source` names the model when several are shown together.
+function signalBlock(s, limits, source = "") {
   if (!s) return `<div class="signal muted">${esc(t("sig.none"))}</div>`;
   const note = downgradeNote(s);
   const tag = note ? t("sig.proposed") : "";
@@ -551,6 +552,7 @@ function signalBlock(s, limits) {
   return `<div class="signal">
     <div class="analysis-head">
       <strong>${esc(t("sig.title"))}</strong>
+      ${source ? `<span class="muted">${esc(source)}</span>` : ""}
       <span class="badge ${esc(s.action)}">${esc(term("action", s.action))}</span>
       <span class="muted">${esc(confidence(s.confidence))}${s.horizon_days ? ` · ${esc(t("sig.horizon", { n: s.horizon_days }))}` : ""}</span>
     </div>
@@ -571,7 +573,7 @@ async function renderSignals() {
   const latest = s.latest.map((r) => {
     const g = r.signal;
     return `<tr data-ticker="${esc(r.ticker)}" style="cursor:pointer">
-      <td>${stock(r)}</td>
+      <td>${stock(r)}</td><td title="${esc(r.model || "")}">${esc(r.provider)}</td>
       <td><span class="badge ${esc(g.action)}">${esc(term("action", g.action))}</span></td>
       <td class="num">${Math.round(g.confidence * 100)}%</td>
       <td class="num">${g.horizon_days ? esc(horizonShort(g.horizon_days)) : "–"}</td>
@@ -581,14 +583,14 @@ async function renderSignals() {
       <td class="num">${price(g.take_profit, r)}</td>
       <td class="num">${g.reward_risk == null ? "–" : fmt(g.reward_risk)}</td>
       <td>${esc(signalSize(g, L))}</td>
-      <td>${esc(r.run_date)}</td>
+      <td>${esc(r.run_date)}<span class="muted">${esc(realtimeMark(r))}</span></td>
       <td class="reason">${esc(downgradeNote(g) || g.reasoning)}</td>
     </tr>`; }).join("");
 
   const history = s.history.map((r) => {
     const g = r.signal, o = r.outcome;
     return `<tr>
-      <td>${esc(r.run_date)}</td><td>${stock(r)}</td>
+      <td>${esc(r.run_date)}</td><td>${stock(r)}</td><td title="${esc(r.model || "")}">${esc(r.provider)}</td>
       <td><span class="badge ${esc(g.action)}">${esc(term("action", g.action))}</span></td>
       <td class="num">${esc(horizonShort(g.horizon_days))}</td>
       <td class="num">${price(g.limit_price, r)} ${esc(unit(r))}</td>
@@ -608,7 +610,7 @@ async function renderSignals() {
   $("view-signals").innerHTML = `
     <div class="card"><h3>${esc(t("signals.latest"))}</h3>
       ${latest ? `<div class="table-wrap"><table>
-        <tr>${th("th.stock")}${th("th.signal")}${th("th.conf", 1)}${th("th.horizon", 1)}
+        <tr>${th("th.stock")}${th("th.model")}${th("th.signal")}${th("th.conf", 1)}${th("th.horizon", 1)}
         ${th("th.lastClose", 1)}${th("th.limit", 1)}${th("sig.stop", 1)}
         ${th("sig.take", 1)}${th("sig.rr", 1)}${th("sig.position")}
         ${th("th.asOf")}${th("th.why")}</tr>${latest}</table></div>`
@@ -620,7 +622,7 @@ async function renderSignals() {
     </div>
     <div class="card"><h3>${esc(t("signals.past"))}</h3>
       ${history ? `<div class="table-wrap"><table>
-        <tr>${th("th.date")}${th("th.stock")}${th("th.signal")}${th("th.horizon", 1)}${th("th.limit", 1)}
+        <tr>${th("th.date")}${th("th.stock")}${th("th.model")}${th("th.signal")}${th("th.horizon", 1)}${th("th.limit", 1)}
         ${th("sig.stop", 1)}${th("sig.take", 1)}${th("th.outcome")}${th("th.return", 1)}</tr>
         ${history}</table></div>` : `<p class="muted">${esc(t("signals.noTrades"))}</p>`}
       <p class="muted note">${esc(record)} ${esc(t("signals.simulated"))}</p>
@@ -635,6 +637,27 @@ $("view-signals").addEventListener("click", (e) => {
 });
 
 // --- stock detail -----------------------------------------------------------
+
+// The latest trade signal of every model that has analyzed the stock, newest analysis first
+// (d.analyses is sorted that way), so the models can be compared side by side.
+function signalBlocks(d) {
+  const latest = new Map();
+  for (const a of d.analyses) if (!latest.has(a.provider)) latest.set(a.provider, a);
+  const shown = [...latest.values()].filter((a) => a.signal);
+  if (shown.length < 2) return signalBlock(d.analyses[0].signal, d.signal_limits);
+  return `<div class="signals-row">${shown.map((a) => signalBlock(a.signal, d.signal_limits,
+    `${a.provider} / ${a.model}${a.effort ? " · " + a.effort : ""} · ${a.run_date}${realtimeMark(a)}`)).join("")}</div>`;
+}
+
+// Realtime analyses are made during the session from the live price and are not graded.
+const isRealtime = (a) => a.mode === "realtime";
+const realtimeMark = (a) => (isRealtime(a) ? ` · ${t("mode.realtime")}` : "");
+function realtimeBadge(a) {
+  const live = isRealtime(a) && a.indicators && a.indicators.live;
+  if (!live) return "";
+  const text = t("analysis.realtime", { time: live.as_of.slice(11), price: money(live.price), unit: state.unit });
+  return `<span class="badge realtime" title="${esc(t("stock.realtimeTitle"))}">${esc(text)}</span>`;
+}
 
 function renderAnalysis(d) {
   const a = d.analyses[0];
@@ -655,10 +678,11 @@ function renderAnalysis(d) {
     <div class="analysis-head">
       <h3 style="margin:0">${esc(t("analysis.title"))}</h3>
       <span class="badge ${esc(a.trend)}">${esc(term("trend", a.trend))}</span>
+      ${realtimeBadge(a)}
       <span class="muted">${esc(a.run_date)} · ${esc(a.provider)} / ${esc(a.model)}${a.effort ? " · " + esc(a.effort) : ""}</span>
     </div>
     <div class="forecasts">${forecasts}</div>
-    ${signalBlock(a.signal, d.signal_limits)}
+    ${signalBlocks(d)}
     <p>${esc(a.summary)}</p>
     <h3>${esc(t("analysis.keySignals"))}</h3>${list(a.key_signals)}
     <h3>${esc(t("analysis.risks"))}</h3>${list(a.risks)}
@@ -688,9 +712,10 @@ function renderIndicators(d) {
 
 function renderHistory(d) {
   const th = (key, num) => `<th${num ? ' class="num"' : ""}>${esc(t(key))}</th>`;
-  const rows = d.analyses.flatMap((a) => a.predictions.map((p) => `
+  const rows = d.analyses.flatMap((a) => a.predictions.map((p) => ({ ...p,
+    outcome: isRealtime(a) ? "ungraded" : p.outcome })).map((p) => `
     <tr>
-      <td>${esc(a.run_date)}</td><td>${esc(a.provider)}</td><td class="num">${esc(horizonShort(p.horizon_days))}</td>
+      <td>${esc(a.run_date)}<span class="muted">${esc(realtimeMark(a))}</span></td><td>${esc(a.provider)}</td><td class="num">${esc(horizonShort(p.horizon_days))}</td>
       <td><span class="badge ${esc(p.direction)}">${esc(term("dir", p.direction))}</span></td>
       <td class="num">${Math.round(p.confidence * 100)}%</td>
       <td class="num">${money(p.base_close)}</td>
@@ -746,8 +771,16 @@ function selectTicker(ticker) {
   loadStock();
 }
 
+// Realtime: analyze during the session with the live price. The choice is remembered in this
+// browser; storage can be unavailable (private windows), then it just starts switched off.
+try { $("realtime").checked = localStorage.getItem("realtime") === "1"; } catch {}
+$("realtime").addEventListener("change", (e) => {
+  try { localStorage.setItem("realtime", e.target.checked ? "1" : "0"); } catch {}
+});
+
 $("analyze").addEventListener("click", async () => {
-  try { await api(`/api/analyze/${encodeURIComponent(state.ticker)}`, { method: "POST" }); }
+  const query = $("realtime").checked ? "?realtime=true" : "";
+  try { await api(`/api/analyze/${encodeURIComponent(state.ticker)}${query}`, { method: "POST" }); }
   catch (e) { alert(e.message); }
   refreshStatus();
 });

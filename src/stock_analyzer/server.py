@@ -324,9 +324,9 @@ def stock(ticker: str):
 
 # --- running analyses -----------------------------------------------------
 
-def _analyze_one(ticker: str, provider: str) -> None:
+def _analyze_one(ticker: str, provider: str, realtime: bool = False) -> None:
     try:
-        analyzer.analyze_ticker(ticker, provider, config.load(), force=True)
+        analyzer.analyze_ticker(ticker, provider, config.load(), force=True, realtime=realtime)
         _single_errors.pop(ticker, None)
     except Exception as exc:
         _single_errors[ticker] = str(exc)
@@ -335,15 +335,17 @@ def _analyze_one(ticker: str, provider: str) -> None:
 
 
 @app.post("/api/analyze/{ticker}")
-def analyze(ticker: str, provider: str | None = None):
+def analyze(ticker: str, provider: str | None = None, realtime: bool = False):
+    """Analyze one stock now. `realtime` uses the live price of the session in progress
+    (fails while the exchange is closed) and stores an ungraded analysis of its own."""
     ticker, provider = _ticker(ticker), _provider(provider)
     with _single_lock:
         if ticker in _single_active or runner.is_running():
             raise HTTPException(409, "An analysis is already in progress")
         _single_active.add(ticker)
     _single_errors.pop(ticker, None)
-    threading.Thread(target=_analyze_one, args=(ticker, provider), daemon=True).start()
-    return {"started": ticker, "provider": provider}
+    threading.Thread(target=_analyze_one, args=(ticker, provider, realtime), daemon=True).start()
+    return {"started": ticker, "provider": provider, "realtime": realtime}
 
 
 @app.post("/api/run")
@@ -367,24 +369,32 @@ def accuracy():
 
 @app.get("/api/signals")
 def get_signals():
-    """Latest trade signal per watchlist stock, plus past buy/sell signals and what followed."""
+    """Latest trade signal per watchlist stock and model, plus past buy/sell signals and what
+    followed. The models' rows for one stock stay together, so they can be compared."""
     listed = {w["ticker"]: w for w in db.watchlist()}
-    latest: dict[str, dict] = {}
+    latest: dict[tuple[str, str], dict] = {}
     history = []
     for row in db.signals():
         entry = listed.get(row["ticker"])
         if entry is None or row["close"] is None:
             continue
         row.update(name=entry["name"], currency=entry["currency"])
-        if row["ticker"] not in latest:
-            latest[row["ticker"]] = row
-        if row["signal"]["action"] != "hold":
+        latest.setdefault((row["ticker"], row["provider"]), row)
+        # Realtime signals are shown as the latest view but never enter the track record.
+        if row["signal"]["action"] != "hold" and row["mode"] == "daily":
             bars = db.bars_after(row["ticker"], row["run_date"], row["signal"]["horizon_days"])
             history.append({**row, "outcome": signals.outcome(row["signal"], row["close"], bars)})
     order = {"buy": 0, "sell": 1, "hold": 2}
+
+    def rank(row: dict) -> tuple:
+        return order[row["signal"]["action"]], -row["signal"]["confidence"]
+
+    # Stocks are ordered by their most actionable signal; within a stock, newest model first.
+    best: dict[str, tuple] = {}
+    for row in latest.values():
+        best[row["ticker"]] = min(best.get(row["ticker"], rank(row)), rank(row))
     return {
-        "latest": sorted(latest.values(),
-                         key=lambda r: (order[r["signal"]["action"]], -r["signal"]["confidence"])),
+        "latest": sorted(latest.values(), key=lambda r: (best[r["ticker"]], r["ticker"])),
         "history": history,
         "summary": signals.summarize(history),
         "limits": config.load()["signals"],

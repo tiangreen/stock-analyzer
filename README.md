@@ -105,6 +105,13 @@ Good to know:
   The schedule only fires while the server is running; if the server starts after that time
   and no run has happened yet, it catches up immediately.
 - **Run now** analyzes the whole watchlist; **Analyze now** redoes the selected stock.
+- **Realtime** (checkbox beside Analyze now) analyzes the selected stock during its trading
+  session: the model also gets the live price, today's bar so far and its 15-minute bars, and
+  forecasts from the live price with today's close as the first horizon. It works only while
+  the stock's exchange is open, and Yahoo quotes can be delayed (often 15 minutes). A realtime
+  analysis is stored beside the after-close one and marked as such; its forecasts and signals
+  are not graded, so Accuracy and the signal record stay close-to-close. The daily run and
+  Run now always analyze the last finished session.
 - **Signals** lists the latest trade signal (buy, sell or hold) per stock and how past signals
   turned out (see "Trade signals" below).
 - **Accuracy** shows hit rates per model, horizon and stock. **Runs** shows the run log.

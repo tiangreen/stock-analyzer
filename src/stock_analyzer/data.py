@@ -58,6 +58,59 @@ def session_unfinished(last_bar, session: dict | None, now=None) -> bool:
         return False
 
 
+def live_session(ticker: str, now=None) -> dict | None:
+    """The exchange's current, unfinished session: the live price, today's bar so far and its
+    15-minute bars, in the exchange's own time. None while the exchange is closed.
+
+    Read straight from Yahoo and never cached: the stored daily series holds finished
+    sessions only. Quotes can be delayed by the exchange (often 15 minutes)."""
+    try:
+        source = yf.Ticker(ticker)
+        daily = source.history(period="5d", interval="1d", auto_adjust=True)
+    except Exception as exc:
+        raise DataError(f"{ticker}: download failed ({exc})") from exc
+    if daily is None or daily.empty:
+        return None
+    daily = daily.dropna(subset=["Close"])
+    try:
+        session = (source.history_metadata or {}).get("currentTradingPeriod", {}).get("regular")
+    except Exception:
+        session = None
+    if len(daily) < 2 or not session_unfinished(daily.index[-1], session, now):
+        return None
+
+    end = pd.Timestamp(session["end"])
+    now = pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz=end.tz)
+    if now.tzinfo is not None and end.tzinfo is not None:
+        now = now.tz_convert(end.tz)
+    day = pd.Timestamp(daily.index[-1]).date()
+    today, previous = daily.iloc[-1], daily.iloc[-2]
+    try:
+        intraday = source.history(period="1d", interval="15m", auto_adjust=True)
+        intraday = intraday.dropna(subset=["Close"])
+    except Exception:  # the intraday bars are a bonus; the live price is what matters
+        intraday = None
+    bars = [] if intraday is None else [
+        {"time": idx.strftime("%H:%M"), "open": float(r.Open), "high": float(r.High),
+         "low": float(r.Low), "close": float(r.Close), "volume": float(r.Volume or 0)}
+        for idx, r in intraday.iterrows() if idx.date() == day
+    ]
+    price, prev_close = round(float(today.Close), 4), round(float(previous.Close), 4)
+    return {
+        "date": day.strftime("%Y-%m-%d"),
+        "as_of": now.strftime("%Y-%m-%d %H:%M"),
+        "timezone": str(end.tz) if end.tz is not None else "",
+        "price": price,
+        "open": round(float(today.Open), 4), "high": round(float(today.High), 4),
+        "low": round(float(today.Low), 4),
+        "volume": float(today.Volume or 0),
+        "prev_close": prev_close,
+        "change_pct": round((price / prev_close - 1) * 100, 2),
+        "minutes_left": max(0, int((end - now).total_seconds() // 60)),
+        "bars": bars,
+    }
+
+
 SEARCH_TYPES = {"EQUITY", "ETF", "INDEX"}
 
 

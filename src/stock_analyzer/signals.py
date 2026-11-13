@@ -35,7 +35,9 @@ def example(horizons: list[int]) -> dict:
             "limit_price": 0.0, "stop_loss": 0.0, "take_profit": 0.0, "reasoning": "1-3 sentences"}
 
 
-def instructions(horizons: list[int]) -> str:
+def instructions(horizons: list[int], live: bool = False) -> str:
+    """`live`: the analysis runs during the session, so the order is placed at the live price."""
+    near = "the live price" if live else "today's close"
     return f"""Finally give one trade signal for a long-only retail investor who places orders by hand
 (no short selling, no leverage, no derivatives):
 - action: "buy" (open or add to a position), "sell" (exit or reduce a position already held) or
@@ -44,7 +46,7 @@ def instructions(horizons: list[int]) -> str:
 - horizon_days: the horizon from {horizons} the signal is based on. It must agree with your
   forecast for that horizon.
 - confidence: probability from 0 to 1 that acting on the signal beats doing nothing.
-- limit_price: the limit for the order, close to today's close.
+- limit_price: the limit for the order, close to {near}.
 - stop_loss and take_profit: for "buy", the exit prices below and above the limit. The distance
   to take_profit should be clearly larger than the distance to stop_loss.
 - Use 0 for prices that do not apply: all three for "hold", stop_loss and take_profit for "sell".
@@ -87,8 +89,10 @@ def parse(raw, horizons: list[int]) -> dict | None:
     }
 
 
-def review(signal: dict | None, close: float, predictions: list[dict], limits: dict) -> dict | None:
-    """Apply the guard rails. Returns the signal to store, with:
+def review(signal: dict | None, close: float, predictions: list[dict], limits: dict,
+           live: bool = False) -> dict | None:
+    """Apply the guard rails. `close` is the price the limit is measured against: the last
+    close, or the live price when `live` is set. Returns the signal to store, with:
 
     action           what the dashboard shows (the proposal, or "hold" if a check failed)
     proposed_action  what the model asked for
@@ -132,8 +136,9 @@ def review(signal: dict | None, close: float, predictions: list[dict], limits: d
     else:
         gap = abs(limit / close - 1) * 100
         if gap > limits["max_entry_gap_pct"]:
-            fail(f"limit is {gap:.1f}% away from the last close "
-                 f"(maximum {limits['max_entry_gap_pct']:g}%)", "entry_gap",
+            fail(f"limit is {gap:.1f}% away from the {'live price' if live else 'last close'} "
+                 f"(maximum {limits['max_entry_gap_pct']:g}%)",
+                 "entry_gap_live" if live else "entry_gap",
                  value=round(gap, 1), limit=limits["max_entry_gap_pct"])
 
     if action == "sell":

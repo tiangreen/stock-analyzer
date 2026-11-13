@@ -8,7 +8,26 @@ from datetime import datetime
 
 from . import config
 
-SCHEMA = """
+# mode: 'daily' (after the close, graded) or 'realtime' (during the session, not graded).
+# A stock can have one analysis of each mode per date and provider.
+ANALYSES_TABLE = """(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL, run_date TEXT NOT NULL,
+    provider TEXT NOT NULL, model TEXT,
+    created_at TEXT NOT NULL,
+    trend TEXT, summary TEXT,
+    support REAL, resistance REAL,
+    signals_json TEXT, risks_json TEXT,
+    indicators_json TEXT, raw_response TEXT,
+    effort TEXT, signal_json TEXT,
+    mode TEXT NOT NULL DEFAULT 'daily',
+    UNIQUE (ticker, run_date, provider, mode)
+)"""
+ANALYSES_COPIED = ("id, ticker, run_date, provider, model, created_at, trend, summary, support,"
+                   " resistance, signals_json, risks_json, indicators_json, raw_response, effort,"
+                   " signal_json")
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS watchlist (
     ticker TEXT PRIMARY KEY,
     name TEXT, exchange TEXT, currency TEXT,
@@ -20,17 +39,7 @@ CREATE TABLE IF NOT EXISTS prices (
     open REAL, high REAL, low REAL, close REAL, volume REAL,
     PRIMARY KEY (ticker, date)
 );
-CREATE TABLE IF NOT EXISTS analyses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker TEXT NOT NULL, run_date TEXT NOT NULL,
-    provider TEXT NOT NULL, model TEXT,
-    created_at TEXT NOT NULL,
-    trend TEXT, summary TEXT,
-    support REAL, resistance REAL,
-    signals_json TEXT, risks_json TEXT,
-    indicators_json TEXT, raw_response TEXT,
-    UNIQUE (ticker, run_date, provider)
-);
+CREATE TABLE IF NOT EXISTS analyses {ANALYSES_TABLE};
 CREATE TABLE IF NOT EXISTS predictions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     analysis_id INTEGER NOT NULL REFERENCES analyses(id) ON DELETE CASCADE,
@@ -40,7 +49,8 @@ CREATE TABLE IF NOT EXISTS predictions (
     target_low REAL, target_high REAL,
     base_close REAL NOT NULL, due_date TEXT,
     actual_date TEXT, actual_close REAL, actual_return REAL,
-    outcome TEXT, in_range INTEGER
+    outcome TEXT, in_range INTEGER,
+    mode TEXT NOT NULL DEFAULT 'daily'
 );
 CREATE INDEX IF NOT EXISTS idx_pred_open ON predictions(outcome, ticker);
 CREATE TABLE IF NOT EXISTS runs (
@@ -76,11 +86,38 @@ def connect():
                 conn.execute("ALTER TABLE analyses ADD COLUMN effort TEXT")
             if "signal_json" not in columns:  # trade signals came later still
                 conn.execute("ALTER TABLE analyses ADD COLUMN signal_json TEXT")
+            if "mode" not in columns:  # realtime analyses came after that
+                _add_analysis_mode(conn)
+            if "mode" not in {r["name"] for r in conn.execute("PRAGMA table_info(predictions)")}:
+                conn.execute("ALTER TABLE predictions ADD COLUMN mode TEXT NOT NULL DEFAULT 'daily'")
             _initialized = True
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+def _add_analysis_mode(conn: sqlite3.Connection) -> None:
+    """Rebuild `analyses` with the mode column inside its unique key (SQLite cannot change a
+    unique key in place). Foreign keys are off meanwhile, or dropping the old table would
+    delete every forecast that points at it."""
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(f"""
+            BEGIN;
+            DROP TABLE IF EXISTS analyses_new;
+            CREATE TABLE analyses_new {ANALYSES_TABLE};
+            INSERT INTO analyses_new({ANALYSES_COPIED}) SELECT {ANALYSES_COPIED} FROM analyses;
+            DROP TABLE analyses;
+            ALTER TABLE analyses_new RENAME TO analyses;
+            COMMIT;
+        """)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def reset_for_tests() -> None:
@@ -145,32 +182,34 @@ def remove_ticker(ticker: str) -> None:
 
 def save_analysis(ticker: str, run_date: str, provider: str, model: str, result: dict,
                   indicators: dict, raw: str, base_close: float,
-                  due_dates: dict[int, str], effort: str = "") -> int:
+                  due_dates: dict[int, str], effort: str = "", mode: str = "daily") -> int:
+    """Store an analysis and its forecasts, replacing the one of the same date, provider and
+    mode. For mode 'realtime', `base_close` is the live price the forecasts start from."""
     with connect() as conn:
         conn.execute(
-            "DELETE FROM analyses WHERE ticker = ? AND run_date = ? AND provider = ?",
-            (ticker, run_date, provider),
+            "DELETE FROM analyses WHERE ticker = ? AND run_date = ? AND provider = ? AND mode = ?",
+            (ticker, run_date, provider, mode),
         )
         cur = conn.execute(
             "INSERT INTO analyses(ticker, run_date, provider, model, created_at, trend, summary,"
             " support, resistance, signals_json, risks_json, indicators_json, raw_response, effort,"
-            " signal_json)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " signal_json, mode)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (ticker, run_date, provider, model, now(), result["trend"], result["summary"],
              result.get("support"), result.get("resistance"),
              json.dumps(result["key_signals"]), json.dumps(result["risks"]),
              json.dumps(indicators), raw, effort or None,
-             json.dumps(result["signal"]) if result.get("signal") else None),
+             json.dumps(result["signal"]) if result.get("signal") else None, mode),
         )
         analysis_id = cur.lastrowid
         for p in result["predictions"]:
             conn.execute(
                 "INSERT INTO predictions(analysis_id, ticker, provider, run_date, horizon_days,"
-                " direction, confidence, target_low, target_high, base_close, due_date)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                " direction, confidence, target_low, target_high, base_close, due_date, mode)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (analysis_id, ticker, provider, run_date, p["horizon_days"], p["direction"],
                  p["confidence"], p["target_low"], p["target_high"], base_close,
-                 due_dates.get(p["horizon_days"])),
+                 due_dates.get(p["horizon_days"]), mode),
             )
         return analysis_id
 
@@ -208,12 +247,15 @@ def latest_analysis(ticker: str, provider: str | None = None) -> dict | None:
 
 
 def signals(limit: int = 300) -> list[dict]:
-    """Analyses that carry a trade signal, newest first: ticker, dates, close and the signal."""
+    """Analyses that carry a trade signal, newest first: ticker, dates, close and the signal.
+    For a realtime analysis `close` is the live price it was made at."""
     found = rows(
-        "SELECT id, ticker, run_date, provider, model, indicators_json, signal_json FROM analyses "
+        "SELECT id, ticker, run_date, provider, model, mode, indicators_json, signal_json "
+        "FROM analyses "
         "WHERE signal_json IS NOT NULL ORDER BY run_date DESC, created_at DESC LIMIT ?", (limit,))
     for a in found:
-        a["close"] = json.loads(a.pop("indicators_json") or "{}").get("close")
+        snap = json.loads(a.pop("indicators_json") or "{}")
+        a["close"] = (snap.get("live") or {}).get("price") if a["mode"] == "realtime" else snap.get("close")
         a["signal"] = json.loads(a.pop("signal_json"))
     return found
 
@@ -225,7 +267,9 @@ def bars_after(ticker: str, date: str, count: int) -> list[dict]:
 
 
 def has_analysis(ticker: str, run_date: str, provider: str) -> bool:
+    """True if the after-close analysis exists; a realtime one for that date does not count."""
     return one(
-        "SELECT 1 AS x FROM analyses WHERE ticker = ? AND run_date = ? AND provider = ?",
+        "SELECT 1 AS x FROM analyses WHERE ticker = ? AND run_date = ? AND provider = ? "
+        "AND mode = 'daily'",
         (ticker, run_date, provider),
     ) is not None

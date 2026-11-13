@@ -74,10 +74,13 @@ a.button[hidden] { display: none; }
 .badge.bearish, .badge.down, .badge.miss, .badge.sell, .badge.stopped, .badge.wrong { color: var(--down); }
 .badge.neutral, .badge.flat, .badge.hold { color: var(--flat); }
 .signal { background: var(--panel2); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+.signals-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
 .signal .kv { margin: 8px 0; max-width: 360px; }
 .signal p { margin: 6px 0 0; }
 td.reason { min-width: 260px; white-space: normal; color: var(--muted); }
-.badge.pending { color: var(--muted); }
+.badge.pending, .badge.ungraded { color: var(--muted); }
+.badge.realtime { color: #4c9aff; }
+.realtime { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
 
 .stock-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
 .stock-actions { display: flex; gap: 8px; }
