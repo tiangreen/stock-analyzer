@@ -112,3 +112,40 @@ def test_effort_column_is_added_to_an_old_database(temp_db):
               "resistance": None, "predictions": []}
     db.save_analysis("NEW", "2026-01-05", "codex", "gpt-a", result, {}, "raw", 100.0, {}, effort="ultra")
     assert db.latest_analysis("NEW")["effort"] == "ultra"
+
+
+class _Request:
+    def __init__(self, **headers):
+        self.headers = headers
+
+
+def test_shutdown_asks_the_running_server_to_exit(monkeypatch):
+    import time
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from stock_analyzer import server
+
+    running = SimpleNamespace(should_exit=False)
+    monkeypatch.setattr(server, "_server", running)
+    with pytest.raises(HTTPException) as refused:  # another site open in the browser
+        server.shutdown(_Request(origin="https://evil.example", host="127.0.0.1:8765"))
+    assert refused.value.status_code == 403 and not running.should_exit
+
+    assert server.shutdown(_Request(origin="http://127.0.0.1:8765", host="127.0.0.1:8765")) == {"stopping": True}
+    deadline = time.monotonic() + 3
+    while not running.should_exit and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert running.should_exit
+
+
+def test_shutdown_needs_the_apps_own_launcher(monkeypatch):
+    from fastapi import HTTPException
+
+    from stock_analyzer import server
+
+    monkeypatch.setattr(server, "_server", None)
+    with pytest.raises(HTTPException) as refused:
+        server.shutdown(_Request(host="127.0.0.1:8765"))
+    assert refused.value.status_code == 409

@@ -58,12 +58,13 @@ def session_unfinished(last_bar, session: dict | None, now=None) -> bool:
         return False
 
 
-def live_session(ticker: str, now=None) -> dict | None:
+def live_session(ticker: str, now=None, bars: bool = True) -> dict | None:
     """The exchange's current, unfinished session: the live price, today's bar so far and its
     15-minute bars, in the exchange's own time. None while the exchange is closed.
 
     Read straight from Yahoo and never cached: the stored daily series holds finished
-    sessions only. Quotes can be delayed by the exchange (often 15 minutes)."""
+    sessions only. Quotes can be delayed by the exchange (often 15 minutes).
+    `bars=False` skips the 15-minute bars: one request, for the dashboard's live quote."""
     try:
         source = yf.Ticker(ticker)
         daily = source.history(period="5d", interval="1d", auto_adjust=True)
@@ -85,11 +86,13 @@ def live_session(ticker: str, now=None) -> dict | None:
         now = now.tz_convert(end.tz)
     day = pd.Timestamp(daily.index[-1]).date()
     today, previous = daily.iloc[-1], daily.iloc[-2]
-    try:
-        intraday = source.history(period="1d", interval="15m", auto_adjust=True)
-        intraday = intraday.dropna(subset=["Close"])
-    except Exception:  # the intraday bars are a bonus; the live price is what matters
-        intraday = None
+    intraday = None
+    if bars:
+        try:
+            intraday = source.history(period="1d", interval="15m", auto_adjust=True)
+            intraday = intraday.dropna(subset=["Close"])
+        except Exception:  # the intraday bars are a bonus; the live price is what matters
+            intraday = None
     bars = [] if intraday is None else [
         {"time": idx.strftime("%H:%M"), "open": float(r.Open), "high": float(r.High),
          "low": float(r.Low), "close": float(r.Close), "volume": float(r.Volume or 0)}

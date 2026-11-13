@@ -205,7 +205,15 @@ function renderSettings() {
         </div></div>
     </div>`;
   });
-  view.innerHTML = cards.join("") || `<p class="muted">${esc(t("settings.loading"))}</p>`;
+  view.innerHTML = (cards.join("") || `<p class="muted">${esc(t("settings.loading"))}</p>`) + `
+    <div class="card">
+      <div class="analysis-head"><strong>${esc(t("settings.app"))}</strong></div>
+      <div class="field"><span class="field-name"></span>
+        <div class="field-body">
+          <button id="stop-app" class="danger" ${state.stopped ? "disabled" : ""}>${esc(t("settings.stop"))}</button>
+          <span class="muted">${esc(t("settings.stopHint"))}</span>
+        </div></div>
+    </div>`;
   view.dataset.sig = settingsSig();
 }
 
@@ -273,6 +281,33 @@ $("view-settings").addEventListener("click", (e) => {
     e.target.textContent = t("auth.opening");
     signIn(card.dataset.provider);
   }
+});
+
+// Stop the app. Confirmed with a second click on the button, like removing a stock:
+// embedded browsers answer window.confirm() with "no" without showing it.
+let stopTimer = null;
+$("view-settings").addEventListener("click", async (e) => {
+  const button = e.target.closest("#stop-app");
+  if (!button) return;
+  clearTimeout(stopTimer);
+  if (!button.dataset.armed) {
+    button.dataset.armed = "1";
+    button.textContent = t("settings.stopAgain");
+    stopTimer = setTimeout(() => { if (!$("view-settings").hidden) renderSettings(); }, 4000);
+    return;
+  }
+  const banner = $("banner");
+  banner.hidden = false;
+  try {
+    await api("/api/shutdown", { method: "POST" });
+    state.stopped = true;   // the status poll now fails and leaves this banner in place
+    banner.className = "";
+    banner.textContent = t("settings.stopped");
+  } catch (err) {
+    banner.className = "bad";
+    banner.textContent = t("settings.stopFailed", { error: err.message });
+  }
+  renderSettings();
 });
 
 $("view-settings").addEventListener("submit", async (e) => {
@@ -759,7 +794,82 @@ async function loadStock() {
     .filter(Boolean).join(" · ");
   if (d.candles.length) drawCharts(d);
   renderAnalysis(d); renderIndicators(d); renderHistory(d);
+  live.stock = { ticker: d.ticker, lastDate: d.candles.length ? d.candles.at(-1).time : null };
+  if (live.result && live.result.ticker === d.ticker) showLive(); else refreshLive();
 }
+
+// --- live price ---------------------------------------------------------------
+// The price of the session in progress: once on "Refresh", or every 10 or 30 seconds. It
+// updates the line under the title and the chart's forming candle; analyses are untouched
+// and no model runs. Polling waits while the page is hidden, and slows to once a minute
+// while the exchange is closed.
+
+const live = { every: 0, timer: null, stock: null, result: null, failed: false, loading: false };
+const LIVE_CLOSED_EVERY = 60;
+try { live.every = [10, 30].includes(+localStorage.getItem("liveEvery")) ? +localStorage.getItem("liveEvery") : 0; } catch {}
+
+function showLive() {
+  for (const b of document.querySelectorAll(".live-auto")) {
+    b.classList.toggle("active", +b.dataset.seconds === live.every);
+    b.textContent = t("live.every", { n: b.dataset.seconds });
+  }
+  const r = live.result && state.ticker === live.result.ticker ? live.result : null;
+  const text = $("live-text");
+  if (live.failed && !r) { text.textContent = t("live.failed"); return; }
+  if (!r) { text.textContent = ""; return; }
+  if (!r.open) { text.textContent = t("live.closed"); return; }
+  const q = r.quote;
+  text.innerHTML = `${esc(t("live.label"))} <strong style="color:var(--text)">${money(q.price)} ${esc(state.unit)}</strong>
+    <span class="${sign(q.change_pct)}">${pct(q.change_pct)}</span>
+    · ${esc(t("live.asOf", { time: q.as_of.slice(11), zone: q.timezone.split("/").pop().replace(/_/g, " ") }))}
+    · ${esc(t("live.range", { low: money(q.low), high: money(q.high) }))}`;
+  // Today's bar is not in the stored series (finished sessions only): draw it as it forms.
+  const c = state.charts, s = live.stock;
+  if (c && s && s.ticker === r.ticker && s.lastDate && q.date > s.lastDate) {
+    const k = state.k;
+    c.candles.update({ time: q.date, open: q.open * k, high: q.high * k, low: q.low * k, close: q.price * k });
+    c.volume.update({ time: q.date, value: q.volume,
+      color: q.price >= q.open ? "rgba(46,189,133,.35)" : "rgba(246,70,93,.35)" });
+  }
+}
+
+async function refreshLive() {
+  const ticker = state.ticker;
+  if (!ticker || live.loading) return;
+  live.loading = true;
+  try {
+    const result = await api(`/api/live/${encodeURIComponent(ticker)}`);
+    if (state.ticker === ticker) { live.result = result; live.failed = false; }
+  } catch {
+    if (state.ticker === ticker) { live.result = null; live.failed = true; }
+  } finally {
+    live.loading = false;
+  }
+  showLive();
+}
+
+function scheduleLive() {
+  clearTimeout(live.timer);
+  if (!live.every) return;
+  const closed = live.result && !live.result.open;
+  live.timer = setTimeout(async () => {
+    if (!document.hidden && !$("view-stocks").hidden) await refreshLive();
+    scheduleLive();
+  }, (closed ? Math.max(live.every, LIVE_CLOSED_EVERY) : live.every) * 1000);
+}
+
+$("live-refresh").addEventListener("click", async () => { await refreshLive(); scheduleLive(); });
+for (const b of document.querySelectorAll(".live-auto")) {
+  b.addEventListener("click", async () => {
+    live.every = live.every === +b.dataset.seconds ? 0 : +b.dataset.seconds;
+    try { localStorage.setItem("liveEvery", String(live.every)); } catch {}
+    showLive();
+    if (live.every) await refreshLive();
+    scheduleLive();
+  });
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && live.every) refreshLive(); });
+scheduleLive();
 
 function selectTicker(ticker) {
   state.ticker = ticker;

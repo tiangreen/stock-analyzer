@@ -55,6 +55,14 @@
         <div>
           <h2 id="s-title"></h2>
           <div id="s-sub" class="muted"></div>
+          <div id="s-live" class="live">
+            <span id="live-text" class="muted"></span>
+            <span class="live-buttons">
+              <button id="live-refresh" data-i18n="live.refresh" data-i18n-title="live.refreshTitle">Refresh</button>
+              <button class="live-auto" data-seconds="10" data-i18n-title="live.autoTitle10">10s</button>
+              <button class="live-auto" data-seconds="30" data-i18n-title="live.autoTitle30">30s</button>
+            </span>
+          </div>
         </div>
         <div class="stock-actions">
           <a id="tv-link" class="button" target="_blank" rel="noopener" hidden data-i18n="stock.tradingview">Open in TradingView</a>

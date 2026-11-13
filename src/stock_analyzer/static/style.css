@@ -80,6 +80,10 @@ a.button[hidden] { display: none; }
 td.reason { min-width: 260px; white-space: normal; color: var(--muted); }
 .badge.pending, .badge.ungraded { color: var(--muted); }
 .badge.realtime { color: #4c9aff; }
+.live { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.live-buttons { display: inline-flex; gap: 4px; }
+.live-buttons button { padding: 1px 8px; font-size: 12px; }
+.live-buttons button.active { border-color: var(--accent); color: var(--accent); }
 .realtime { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
 
 .stock-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }

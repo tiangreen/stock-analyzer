@@ -24,6 +24,7 @@ TICKER_RE = re.compile(r"[A-Z0-9^][A-Z0-9.\-=^]{0,14}")
 CHART_SERIES = ("sma20", "sma50", "sma200", "bb_upper", "bb_lower", "rsi14",
                 "macd", "macd_signal", "macd_hist")
 
+_server = None  # the uvicorn server once main() started it; the dashboard stops the app through it
 _single_lock = threading.Lock()
 _single_errors: dict[str, str] = {}
 _single_active: set[str] = set()
@@ -63,6 +64,13 @@ def _ticker(raw: str) -> str:
     if not TICKER_RE.fullmatch(ticker):
         raise HTTPException(400, "Invalid ticker symbol")
     return ticker
+
+
+def _same_origin(request: Request) -> None:
+    """Only the dashboard itself may do this, not other sites open in the browser."""
+    origin = request.headers.get("origin")
+    if origin and urlparse(origin).netloc != request.headers.get("host"):
+        raise HTTPException(403, "Cross-origin request refused")
 
 
 def _provider(name: str | None) -> str:
@@ -205,10 +213,7 @@ def put_provider(name: str, body: ChoiceIn):
 @app.post("/api/providers/{name}/login")
 def provider_login(name: str, request: Request):
     """Start the provider's browser sign-in and return its authorize page URL."""
-    # Only the dashboard itself may start a sign-in, not other sites open in the browser.
-    origin = request.headers.get("origin")
-    if origin and urlparse(origin).netloc != request.headers.get("host"):
-        raise HTTPException(403, "Cross-origin request refused")
+    _same_origin(request)
     provider = PROVIDERS[_provider(name)]()
     try:
         started = provider.start_login()
@@ -322,6 +327,31 @@ def stock(ticker: str):
     return payload
 
 
+LIVE_TTL = 5  # seconds; several open tabs polling one stock share a quote
+_live_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+@app.get("/api/live/{ticker}")
+def live(ticker: str):
+    """Live quote of the session in progress, for the stock page's refresh. `quote` is None
+    while the exchange is closed. Only the price is fetched; no model is involved."""
+    ticker = _ticker(ticker)
+    if db.one("SELECT 1 AS x FROM watchlist WHERE ticker = ?", (ticker,)) is None:
+        raise HTTPException(404, "Ticker is not on the watchlist")
+    cached = _live_cache.get(ticker)
+    if cached and time.monotonic() - cached[0] < LIVE_TTL:
+        quote = cached[1]
+    else:
+        try:
+            quote = data.live_session(ticker, bars=False)
+        except data.DataError as exc:
+            raise HTTPException(502, str(exc)) from None
+        if quote:
+            quote.pop("bars", None)
+        _live_cache[ticker] = (time.monotonic(), quote)
+    return {"ticker": ticker, "open": quote is not None, "quote": quote}
+
+
 # --- running analyses -----------------------------------------------------
 
 def _analyze_one(ticker: str, provider: str, realtime: bool = False) -> None:
@@ -401,6 +431,21 @@ def get_signals():
     }
 
 
+# --- stopping the app -----------------------------------------------------
+
+@app.post("/api/shutdown")
+def shutdown(request: Request):
+    """Stop the server process, and with it the daily schedule. An analysis in progress is
+    cut off; the next start marks its run as interrupted."""
+    _same_origin(request)
+    if _server is None:
+        raise HTTPException(409, "The app was not started with run.ps1 / run.sh; "
+                                 "stop it where it was started")
+    # A moment later, so that this answer still reaches the dashboard.
+    threading.Timer(0.3, lambda: setattr(_server, "should_exit", True)).start()
+    return {"stopping": True}
+
+
 # --- static dashboard -----------------------------------------------------
 
 @app.get("/")
@@ -414,9 +459,13 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 def main() -> None:
     import uvicorn
 
+    global _server
     server = config.load()["server"]
     print(f"Dashboard: http://{server['host']}:{server['port']}")
-    uvicorn.run(app, host=server["host"], port=int(server["port"]), log_level="warning")
+    _server = uvicorn.Server(uvicorn.Config(app, host=server["host"], port=int(server["port"]),
+                                            log_level="warning"))
+    _server.run()
+    print("Stock Analyzer stopped.")
 
 
 if __name__ == "__main__":

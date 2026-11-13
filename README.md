@@ -39,6 +39,9 @@ Linux or WSL2:
 Then open http://127.0.0.1:8765. The first start creates the virtual environment and installs
 dependencies.
 
+To stop the app, use **Stop app** in the dashboard's Settings tab (click twice to confirm) or
+press Ctrl+C in the terminal it runs in. The daily schedule only runs while the app does.
+
 ### WSL2
 
 The app runs in WSL2 from the same checkout as on Windows (for example
@@ -105,6 +108,10 @@ Good to know:
   The schedule only fires while the server is running; if the server starts after that time
   and no run has happened yet, it catches up immediately.
 - **Run now** analyzes the whole watchlist; **Analyze now** redoes the selected stock.
+- **Refresh / 10s / 30s** (under the stock's title) fetch the live price of the session in
+  progress, once or automatically every 10 or 30 seconds (click the active button again to
+  stop). The quote and today's forming candle are display only: nothing is stored and no model
+  runs. Auto-refresh waits while the page is hidden and slows down while the exchange is closed.
 - **Realtime** (checkbox beside Analyze now) analyzes the selected stock during its trading
   session: the model also gets the live price, today's bar so far and its 15-minute bars, and
   forecasts from the live price with today's close as the first horizon. It works only while

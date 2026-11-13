@@ -167,3 +167,38 @@ def test_prompt_adds_the_live_session_only_in_realtime():
     assert "versus the live price of 109.5" in realtime
     assert "close to the live price" in realtime
     assert realtime.count('"minutes_left"') == 1  # the stored live block is not repeated
+
+
+def test_live_quote_endpoint(temp_db, monkeypatch):
+    calls = []
+
+    def fake(ticker, bars=True):
+        calls.append(bars)
+        return {"date": "2026-11-12", "price": 105.06, "bars": []}
+
+    monkeypatch.setattr(data, "live_session", fake)
+    server._live_cache.clear()
+    db.add_ticker("TEST", {})
+    out = server.live("TEST")
+    assert out["open"] and out["quote"] == {"date": "2026-11-12", "price": 105.06}
+    server.live("TEST")
+    assert calls == [False]  # no intraday bars, and the second poll is served from the cache
+
+    server._live_cache.clear()
+    monkeypatch.setattr(data, "live_session", lambda ticker, bars=True: None)
+    assert server.live("TEST") == {"ticker": "TEST", "open": False, "quote": None}
+    with pytest.raises(server.HTTPException):
+        server.live("NOPE")
+
+
+def test_live_quote_skips_intraday_bars(monkeypatch):
+    asked = []
+
+    class Counting(FakeTicker):
+        def history(self, period, interval, auto_adjust=True):
+            asked.append(interval)
+            return super().history(period, interval, auto_adjust)
+
+    monkeypatch.setattr(data.yf, "Ticker", Counting)
+    quote = data.live_session("7203.T", now=pd.Timestamp("2026-11-12 11:00", tz=TZ), bars=False)
+    assert quote["price"] == 105.06 and quote["bars"] == [] and asked == ["1d"]
