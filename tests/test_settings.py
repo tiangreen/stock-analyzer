@@ -191,3 +191,22 @@ def test_stop_command_leaves_other_programs_alone(monkeypatch, capsys):
     finally:
         other.shutdown()
         other.server_close()
+
+
+def test_single_stock_analysis_is_logged_as_a_run(temp_db, monkeypatch):
+    from stock_analyzer import analyzer, server
+    monkeypatch.setattr(config, "load", lambda: {})
+    monkeypatch.setattr(analyzer, "analyze_ticker", lambda *a, **k: {
+        "status": "done", "ticker": "AAPL", "run_date": "2026-01-05", "trend": "bullish", "signal": "hold"})
+    server._analyze_one("AAPL", "codex", realtime=True)
+
+    def boom(*a, **k):
+        raise LLMError("no model")
+    monkeypatch.setattr(analyzer, "analyze_ticker", boom)
+    server._analyze_one("MSFT", "codex")
+
+    failed, ok = db.rows("SELECT * FROM runs ORDER BY id DESC")
+    assert (ok["trigger"], ok["provider"], ok["status"], ok["progress"]) == ("single", "codex", "ok", "1/1")
+    assert ok["log"] == "AAPL: bullish, signal hold (2026-01-05, realtime)" and ok["finished_at"]
+    assert (failed["status"], failed["log"]) == ("failed", "MSFT: FAILED - no model")
+    assert server._single_errors.pop("MSFT") == "no model"

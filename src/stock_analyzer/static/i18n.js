@@ -147,7 +147,7 @@ const I18N = {
     "status.ok": "ok", "status.running": "running", "status.failed": "failed",
     "status.partial": "partial", "status.interrupted": "interrupted",
     "trigger.manual": "manual", "trigger.schedule": "schedule", "trigger.catch-up": "catch-up",
-    "trigger.cli": "cli",
+    "trigger.cli": "cli", "trigger.single": "single stock",
   },
 
   de: {
@@ -290,7 +290,7 @@ const I18N = {
     "status.ok": "ok", "status.running": "läuft", "status.failed": "fehlgeschlagen",
     "status.partial": "teilweise", "status.interrupted": "unterbrochen",
     "trigger.manual": "manuell", "trigger.schedule": "Zeitplan", "trigger.catch-up": "nachgeholt",
-    "trigger.cli": "CLI",
+    "trigger.cli": "CLI", "trigger.single": "Einzelaktie",
   },
 
   zh: {
@@ -432,7 +432,7 @@ const I18N = {
     "status.ok": "成功", "status.running": "运行中", "status.failed": "失败",
     "status.partial": "部分成功", "status.interrupted": "已中断",
     "trigger.manual": "手动", "trigger.schedule": "定时", "trigger.catch-up": "补跑",
-    "trigger.cli": "命令行",
+    "trigger.cli": "命令行", "trigger.single": "单只股票",
   },
 };
 

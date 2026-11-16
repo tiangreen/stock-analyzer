@@ -364,13 +364,27 @@ def live(ticker: str):
 # --- running analyses -----------------------------------------------------
 
 def _analyze_one(ticker: str, provider: str, realtime: bool = False) -> None:
+    """Analyze one stock and record it in the run log (trigger 'single')."""
+    run_id = db.execute(
+        "INSERT INTO runs(started_at, trigger, provider, status, progress, log) "
+        "VALUES(?, 'single', ?, 'running', ?, '')",
+        (db.now(), provider, f"0/1 - analyzing {ticker}"),
+    )
+    status = "failed"
+    line = f"{ticker}: FAILED - interrupted"
     try:
-        analyzer.analyze_ticker(ticker, provider, config.load(), force=True, realtime=realtime)
+        out = analyzer.analyze_ticker(ticker, provider, config.load(), force=True, realtime=realtime)
         _single_errors.pop(ticker, None)
+        status = "ok"
+        line = (f"{ticker}: {out['trend']}, signal {out['signal'] or 'none'} "
+                f"({out['run_date']}{', realtime' if realtime else ''})")
     except Exception as exc:
         _single_errors[ticker] = str(exc)
+        line = f"{ticker}: FAILED - {exc}"
     finally:
         _single_active.discard(ticker)
+        db.execute("UPDATE runs SET status = ?, finished_at = ?, progress = '1/1', log = ? "
+                   "WHERE id = ?", (status, db.now(), line, run_id))
 
 
 @app.post("/api/analyze/{ticker}")
