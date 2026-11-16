@@ -27,6 +27,9 @@ class LLMError(Exception):
 
 class Provider:
     name = ""
+    kind = "cli"        # "cli": subscription login through a CLI; "api": key or token over HTTPS
+    label = ""          # shown in the dashboard; "" = the dashboard's own name for it
+    default_model = ""  # what an empty model choice means; "" = the CLI decides
     executable = ""
     login_hint = ""
 

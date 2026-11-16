@@ -69,7 +69,7 @@ def analyze_ticker(ticker: str, provider_name: str, cfg: dict, force: bool = Fal
     first = 1 if live else 0
     due = {h: str(np.busday_offset(run_date, h - first, roll="forward")) for h in horizons}
     analysis_id = db.save_analysis(
-        ticker, run_date, provider_name, model or "default", result, snap, raw,
+        ticker, run_date, provider_name, model or provider.default_model or "default", result, snap, raw,
         base_close=reference, due_dates=due, effort=effort,
         mode="realtime" if live else "daily",
     )

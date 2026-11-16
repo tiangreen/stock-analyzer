@@ -735,7 +735,7 @@ def run(provider_name: str, cfg: dict, note=lambda line, progress=None: None) ->
     if len(errors) == len(CATEGORIES):
         raise LLMError("; ".join(errors))
     stats["seconds"] = round(time.monotonic() - started)
-    return db.save_discovery(provider_name, model or "default", effort, market, stats,
+    return db.save_discovery(provider_name, model or provider.default_model or "default", effort, market, stats,
                              results, picks)
 
 
@@ -818,7 +818,7 @@ def main() -> int:
     from . import runner  # late import: runner imports this module
 
     parser = argparse.ArgumentParser(description="Find stock ideas now (two model calls).")
-    parser.add_argument("--provider", choices=config.PROVIDERS)
+    parser.add_argument("--provider", choices=config.provider_names(config.load()))
     parser.add_argument("--region", action="append", choices=sorted(REGIONS),
                         help="search only this market (repeatable); default: the markets "
                              "selected in the dashboard")

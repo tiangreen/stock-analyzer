@@ -262,6 +262,7 @@ def test_prompt_carries_the_evidence_and_the_rules():
 class FakeProvider:
     """Recommends the two best-ranked stocks of whatever shortlist it is shown."""
     prompts: list[str] = []
+    default_model = ""
 
     def ask(self, prompt, schema, check):
         FakeProvider.prompts.append(prompt)
@@ -430,7 +431,8 @@ def test_performance_is_cached_until_a_new_discovery(temp_db):
 def signed_in(monkeypatch, logged_in=True):
     status = {"installed": True, "logged_in": logged_in, "detail": "signed in" if logged_in else "not signed in"}
     monkeypatch.setattr(runner, "get_provider",
-                        lambda *a, **k: type("P", (), {"login_status": lambda self: status})())
+                        lambda *a, **k: type("P", (), {"login_status": lambda self: status,
+                                                        "login_hint": "Sign in."})())
 
 
 def test_a_discovery_is_logged_as_a_run(temp_db, monkeypatch):

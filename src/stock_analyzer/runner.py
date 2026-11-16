@@ -46,9 +46,10 @@ def run_all(trigger: str = "manual", provider: str | None = None, force: bool = 
         log: list[str] = []
         failed = 0
 
-        auth = get_provider(provider).login_status()
+        llm = get_provider(provider)
+        auth = llm.login_status()
         if auth["logged_in"] is False:
-            message = f"{provider}: {auth['detail']}. Sign in from the dashboard header and run again."
+            message = f"{provider}: {auth['detail']}. {llm.login_hint}"
             if echo:
                 print(message, flush=True)
             db.execute("UPDATE runs SET status = 'failed', finished_at = ?, log = ? WHERE id = ?",
@@ -114,10 +115,10 @@ def run_discovery(trigger: str = "manual", provider: str | None = None,
 
         status = "failed"
         try:
-            auth = get_provider(provider).login_status()
+            llm = get_provider(provider)
+            auth = llm.login_status()
             if auth["logged_in"] is False:
-                raise discovery.LLMError(f"{provider}: {auth['detail']}. Sign in from the "
-                                         "dashboard header and run again.")
+                raise discovery.LLMError(f"{provider}: {auth['detail']}. {llm.login_hint}")
             discovery.run(provider, cfg, note)
             discovery.reset_cache()
             status = "partial" if any("FAILED" in line for line in log) else "ok"
@@ -151,7 +152,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the stock analysis now.")
     parser.add_argument("--ticker", action="append", help="only this ticker (repeatable); "
                         "added to the watchlist if missing")
-    parser.add_argument("--provider", choices=config.PROVIDERS)
+    parser.add_argument("--provider", choices=config.provider_names(config.load()))
     parser.add_argument("--force", action="store_true", help="redo tickers already analyzed today")
     args = parser.parse_args()
 

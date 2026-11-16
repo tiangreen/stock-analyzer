@@ -5,14 +5,15 @@ market data, and once a day asks an Anthropic or GPT model to analyze each stock
 its short-term trend. Forecasts are graded against what actually happened, so you can see how
 reliable each model has been.
 
-The models are reached through your **subscriptions**, not API keys:
+The models are reached through your **subscriptions**, or optionally through an API with a
+key or token (see "API providers" below). The subscriptions:
 
 | Provider | CLI used | Sign in |
 |----------|----------|---------|
 | Claude (Anthropic) | `claude` (Claude Code) | run `claude`, then `/login` |
 | GPT (OpenAI) | `codex` (Codex CLI) | `codex login` with your ChatGPT account |
 
-API-key environment variables are removed from the CLI calls so usage always goes to the
+API-key environment variables are removed from the CLI calls so these two always use the
 subscription login.
 
 **Sign in from the dashboard**: the header shows whether the selected provider is signed in.
@@ -105,7 +106,8 @@ Good to know:
   currency at the latest exchange rate; the stock header also shows the original price.
   Percentage changes stay as they are in the trading currency, so they exclude currency moves.
   The model analyzes in the trading currency, so figures quoted inside its text are unconverted.
-- **Model**: pick Claude or GPT in the header. Model names per provider are set in `config.yaml`.
+- **Model**: pick the provider in the header: Claude or GPT through your subscription, or an
+  API provider. Each provider's model and effort are chosen in the Settings tab.
 - **Daily at**: the time (local) of the automatic weekday run and a checkbox to pause it.
   The schedule only fires while the server is running; if the server starts after that time
   and no run has happened yet, it catches up immediately.
@@ -141,6 +143,59 @@ when the project is on a Windows drive:
 ```bash
 ~/.venvs/stock-analyzer/bin/python -m stock_analyzer.runner --ticker NVDA --provider codex --force
 ```
+
+## API providers
+
+Besides the subscriptions, the app can call models over HTTPS with an API key or a token.
+These are separate providers with their own entry in the header's model list, their own card
+in Settings and their own forecast track record. Usage is billed per token by the service.
+
+| Provider | Type | Credentials |
+|----------|------|-------------|
+| `anthropic-api` (built in) | Anthropic Messages API | `ANTHROPIC_API_KEY` |
+| `openai-api` (built in) | OpenAI chat completions | `OPENAI_API_KEY` |
+| any name you add | any OpenAI-compatible service or gateway | an API key variable you name, or OAuth2 client credentials |
+
+**Secrets come only from environment variables.** `config.yaml` holds the endpoint and the
+*names* of the variables, never a key. Set the variables in the terminal that starts the app
+(or permanently for your user), then start the app:
+
+```powershell
+$env:ANTHROPIC_API_KEY = "..."      # this terminal only
+.\run.ps1
+```
+
+```bash
+export ANTHROPIC_API_KEY=...
+./run.sh
+```
+
+The Settings card shows whether the variable was found (never its value). Pick the model
+there; `anthropic-api` defaults to `claude-opus-5-5`, an OpenAI-type provider needs a model
+chosen in Settings or set as `model` in its entry.
+
+**Other services and M2M gateways** are added under `api_providers` in `config.yaml`; the
+commented example there shows every field. An entry with an `oauth` section uses the OAuth2
+client-credentials grant: the app posts the client ID and secret (from the two variables the
+entry names) to `token_url`, keeps the access token in memory until shortly before it
+expires, sends it as `Authorization: Bearer ...`, and fetches a new one if the API answers
+401. `auth_style` chooses whether the client ID and secret travel in the Basic header or the
+form body. Endpoints must be `https://` (`http://` only for localhost), and can be changed
+only in `config.yaml`, not from the dashboard.
+
+Good to know:
+
+- **Answer format**: `response_format: json_schema` makes the service enforce the answer's
+  shape. It is the default for `anthropic-api` and `openai-api`; custom endpoints default to
+  `none` because many do not support it, which is fine: the prompt asks for JSON only.
+- **Declined requests**: on `anthropic-api`, a request the chosen model declines for safety
+  is answered by Anthropic's recommended fallback model in the same call (current Fable, Opus
+  and Sonnet 5.5 models). The analysis is still stored under the model you chose.
+- **Already installed?** The API providers need new Python packages. Run
+  `.venv\Scripts\python.exe -m pip install -e .` once (Linux, WSL: the same with your
+  environment's `python`), or delete `.venv` and start the app again.
+- The subscription providers are unchanged: `claude` and `codex` still drop API-key variables
+  from the CLI calls, so setting a key never moves subscription usage to API billing.
 
 ## How it works
 
@@ -268,8 +323,8 @@ history, and real-time quotes for the exchanges whose data packages you have (Ya
 are delayed for most non-US markets).
 - Yahoo Finance data is free and unofficial: quotes can be delayed by 15 minutes or more and
   the service occasionally rate-limits.
-- Each analysis is one model call per stock per day, counted against your subscription limits.
-  A Discover search is two more.
+- Each analysis is one model call per stock per day, counted against your subscription limits
+  (or billed per token with an API provider). A Discover search is two more.
 - Output is informational only and is not investment advice. Language models cannot reliably
   predict prices; use the Accuracy tab to judge how much weight the forecasts deserve.
 

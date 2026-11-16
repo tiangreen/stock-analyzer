@@ -13,10 +13,44 @@ watchlist:
   - 005930.KS
   - 7203.T
 
-# Default model provider: "claude" (Claude Code CLI) or "codex" (Codex CLI, ChatGPT login).
+# Default model provider: "claude" (Claude Code CLI), "codex" (Codex CLI, ChatGPT login) or
+# the name of an API provider below (anthropic-api, openai-api, or one you add).
 provider: claude
 
-# Model per provider. Empty string = whatever the CLI defaults to.
+# API providers: models called over HTTPS with a key or token, billed per token, instead of
+# through a subscription CLI. See "API providers" in the README.
+# Secrets never go in this file. Each entry NAMES the environment variables that hold them;
+# set those where the app is started. Two entries are built in and need no lines here:
+#   anthropic-api  (type anthropic, key from ANTHROPIC_API_KEY)
+#   openai-api     (type openai,    key from OPENAI_API_KEY)
+# Add your own under api_providers. `type: openai` is any service that speaks the OpenAI
+# chat-completions format.
+#
+# api_providers:
+#   openrouter:                       # an OpenAI-compatible service with an API key
+#     type: openai
+#     label: OpenRouter               # name shown in the dashboard
+#     base_url: https://openrouter.ai/api/v1
+#     api_key_env: OPENROUTER_API_KEY
+#     model: ""                       # default model; can also be picked in Settings
+#   gateway:                          # a gateway behind M2M authorization (OAuth2 client credentials)
+#     type: openai
+#     label: Company gateway
+#     base_url: https://llm.example.com/v1
+#     oauth:
+#       token_url: https://login.example.com/oauth2/token
+#       client_id_env: LLM_CLIENT_ID
+#       client_secret_env: LLM_CLIENT_SECRET
+#       scope: ""                     # optional
+#       audience: ""                  # optional
+#       auth_style: basic             # how the client ID and secret are sent: basic (header) or body
+#     headers: {}                     # optional extra request headers (no secrets)
+#     models: []                      # optional: the models Settings offers
+#     response_format: none           # none, json_object or json_schema (what the service supports)
+#   openai-api:
+#     enabled: false                  # hides a built-in provider
+
+# Model per provider. Empty string = whatever the CLI defaults to (API providers: their default).
 models:
   claude: ""
   codex: "gpt-6-sol"   # list what your account offers with: codex debug models
