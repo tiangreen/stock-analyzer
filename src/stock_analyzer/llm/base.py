@@ -160,16 +160,21 @@ class Provider:
         found.wait(wait)
         return {"url": url[0] if url else None, "output": "\n".join(lines[-8:])}
 
-    def analyze(self, prompt: str, schema: dict, horizons: list[int]) -> tuple[dict, str]:
-        """Return (validated result, raw text). Retries once on a malformed answer."""
+    def ask(self, prompt: str, schema: dict, check) -> tuple[dict, str]:
+        """Return (checked result, raw text). `check` turns the parsed JSON object into the
+        result or raises LLMError. Retries once on a malformed answer."""
         last: Exception | None = None
         for _ in range(2):
             raw = self.complete(prompt, schema)
             try:
-                return validate(extract_json(raw), horizons), raw
+                return check(extract_json(raw)), raw
             except LLMError as exc:
                 last = exc
         raise LLMError(f"{self.name}: unusable answer ({last})")
+
+    def analyze(self, prompt: str, schema: dict, horizons: list[int]) -> tuple[dict, str]:
+        """One stock's analysis: (validated result, raw text)."""
+        return self.ask(prompt, schema, lambda parsed: validate(parsed, horizons))
 
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)

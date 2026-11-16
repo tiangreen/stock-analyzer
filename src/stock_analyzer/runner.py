@@ -5,7 +5,7 @@ import argparse
 import sys
 import threading
 
-from . import analyzer, config, data, db, scoring
+from . import analyzer, config, data, db, discovery, scoring
 from .llm import get_provider
 
 _lock = threading.Lock()
@@ -86,11 +86,64 @@ def run_all(trigger: str = "manual", provider: str | None = None, force: bool = 
         _lock.release()
 
 
+def run_discovery(trigger: str = "manual", provider: str | None = None,
+                  echo: bool = False, regions: list[str] | None = None) -> int | None:
+    """Find stock ideas (discovery.run) and log it as a run with trigger 'discover'. Shares
+    the lock with the daily run. `regions` overrides the markets selected in the dashboard
+    for this run. Returns the run id, or None if a run is in progress."""
+    if not _lock.acquire(blocking=False):
+        return None
+    try:
+        cfg = config.load()
+        if regions:
+            cfg["discovery"]["regions"] = regions
+        provider = provider or cfg["provider"]
+        run_id = db.execute(
+            "INSERT INTO runs(started_at, trigger, provider, status, progress, log) "
+            "VALUES(?, 'discover', ?, 'running', '0/6', '')", (db.now(), provider))
+        log: list[str] = []
+
+        def note(line: str | None, progress: str | None = None) -> None:
+            if line:
+                log.append(line)
+                if echo:
+                    print(line, flush=True)
+            if progress:
+                db.execute("UPDATE runs SET progress = ? WHERE id = ?", (progress, run_id))
+            db.execute("UPDATE runs SET log = ? WHERE id = ?", ("\n".join(log), run_id))
+
+        status = "failed"
+        try:
+            auth = get_provider(provider).login_status()
+            if auth["logged_in"] is False:
+                raise discovery.LLMError(f"{provider}: {auth['detail']}. Sign in from the "
+                                         "dashboard header and run again.")
+            discovery.run(provider, cfg, note)
+            discovery.reset_cache()
+            status = "partial" if any("FAILED" in line for line in log) else "ok"
+            note(None, "6/6")
+        except Exception as exc:  # the run log must say why, whatever went wrong
+            note(f"FAILED - {exc}")
+        db.execute("UPDATE runs SET status = ?, finished_at = ? WHERE id = ?",
+                   (status, db.now(), run_id))
+        return run_id
+    finally:
+        _lock.release()
+
+
 def start_background(**kwargs) -> bool:
     """Start run_all on a thread. False if a run is already in progress."""
     if is_running():
         return False
     threading.Thread(target=run_all, kwargs=kwargs, daemon=True, name="daily-run").start()
+    return True
+
+
+def start_discovery(**kwargs) -> bool:
+    """Start run_discovery on a thread. False if a run is already in progress."""
+    if is_running():
+        return False
+    threading.Thread(target=run_discovery, kwargs=kwargs, daemon=True, name="discovery").start()
     return True
 
 

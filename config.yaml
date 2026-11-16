@@ -51,6 +51,29 @@ signals:
   portfolio_value: 0        # optional: your portfolio size, to show position sizes as an amount (0 = show % only)
   portfolio_currency: EUR
 
+# Discover tab: the model recommends stocks you do not track yet, short-term and long-term.
+# Code screens the markets below and scores every candidate; the model chooses among the
+# best-scored shortlist. Each run costs two model calls. See "Discover" in the README.
+discovery:
+  # Markets on offer (home exchanges only). Which of them a search covers, one or any
+  # combination, is ticked in the Discover tab.
+  regions: [us, de, fr, nl, ch, gb, jp, kr]
+  min_market_cap_usd: 2000000000
+  min_dollar_volume_usd: 5000000    # average traded per day
+  min_turnover: 0.00025             # daily traded value / market cap; drops foreign cross-listings
+  universe_size: {us: 300, default: 100}   # largest stocks taken per region
+  finalists: 40                     # per category: stocks that get the full data fetch
+  shortlist: 12                     # per category: what the model chooses from
+  max_shortlist_per_sector: 4
+  picks: 5                          # per category: most the model may recommend
+  max_picks_per_sector: 2
+  min_conviction: 0.5               # picks below this model conviction (0-1) are dropped
+  horizons: {short: 20, long: 120}  # trading days after which a pick is graded against its index
+  llm_timeout: 600                  # seconds; the shortlist prompt is long
+  weights:                          # pillar weights of the score (any scale)
+    short: {momentum: 30, revisions: 25, drift: 15, volume: 10, catalyst: 10, overextension: 10}
+    long: {quality: 30, valuation: 25, growth: 20, estimates: 10, trend: 10, risk: 5}
+
 # How much daily history to keep per ticker (yfinance period string).
 history_period: 2y
 

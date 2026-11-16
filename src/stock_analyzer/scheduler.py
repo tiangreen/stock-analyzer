@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from . import config, db, runner
 
 JOB_ID = "daily-run"
+RETRY_ID = "daily-retry"
 _scheduler: BackgroundScheduler | None = None
 
 
@@ -21,7 +22,11 @@ def parse_time(value: str) -> tuple[int, int]:
 
 
 def _fire() -> None:
-    runner.run_all(trigger="schedule")
+    if runner.run_all(trigger="schedule") is None and _scheduler is not None:
+        # Another run holds the lock (a discovery, a manual run): try again shortly.
+        # Stocks analyzed meanwhile are skipped then.
+        _scheduler.add_job(_fire, "date", run_date=datetime.now() + timedelta(minutes=10),
+                           id=RETRY_ID, replace_existing=True)
 
 
 def apply(schedule: dict) -> None:
@@ -56,7 +61,9 @@ def missed_today(schedule: dict, now: datetime | None = None) -> bool:
     due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if now < due:
         return False
-    ran = db.one("SELECT 1 AS x FROM runs WHERE started_at >= ? AND trigger != 'single'",
+    # Only a run over the watchlist counts: not one stock's analysis, not a discovery.
+    ran = db.one("SELECT 1 AS x FROM runs WHERE started_at >= ? "
+                 "AND trigger NOT IN ('single', 'discover')",
                  (due.isoformat(timespec="seconds"),))
     return ran is None
 

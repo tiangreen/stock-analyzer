@@ -60,6 +60,24 @@ CREATE TABLE IF NOT EXISTS runs (
     status TEXT NOT NULL, progress TEXT, log TEXT
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS discoveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    provider TEXT NOT NULL, model TEXT, effort TEXT,
+    regime_json TEXT, stats_json TEXT,
+    short_json TEXT, long_json TEXT
+);
+CREATE TABLE IF NOT EXISTS picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    discovery_id INTEGER NOT NULL REFERENCES discoveries(id) ON DELETE CASCADE,
+    category TEXT NOT NULL, ticker TEXT NOT NULL,
+    name TEXT, sector TEXT, currency TEXT, region TEXT,
+    rank INTEGER, score REAL, conviction REAL,
+    detail_json TEXT,
+    base_date TEXT NOT NULL, base_close REAL NOT NULL,
+    bench_ticker TEXT, horizon_days INTEGER NOT NULL,
+    final_date TEXT, final_return REAL, bench_return REAL
+);
 """
 
 _initialized = False
@@ -264,6 +282,67 @@ def bars_after(ticker: str, date: str, count: int) -> list[dict]:
     """Up to `count` daily bars after `date`, oldest first."""
     return rows("SELECT date, high, low, close FROM prices WHERE ticker = ? AND date > ? "
                 "ORDER BY date LIMIT ?", (ticker, date, count))
+
+
+# --- discovery ------------------------------------------------------------
+
+PICK_COLUMNS = ("category", "ticker", "name", "sector", "currency", "region", "rank", "score",
+                "conviction", "base_date", "base_close", "bench_ticker", "horizon_days")
+
+
+def save_discovery(provider: str, model: str, effort: str, regime: dict, stats: dict,
+                   results: dict[str, dict], picks: list[dict]) -> int:
+    """Store one discovery run. `results` maps 'short' / 'long' to what the tab shows for
+    that category (market view, shortlist, what the model passed over, what the rules
+    dropped); `picks` are the recommendations themselves, which get graded later. A pick's
+    keys beyond PICK_COLUMNS are kept together as its detail."""
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO discoveries(created_at, provider, model, effort, regime_json,"
+            " stats_json, short_json, long_json) VALUES(?,?,?,?,?,?,?,?)",
+            (now(), provider, model, effort or None, json.dumps(regime), json.dumps(stats),
+             json.dumps(results.get("short")), json.dumps(results.get("long"))),
+        )
+        discovery_id = cur.lastrowid
+        for pick in picks:
+            detail = {k: v for k, v in pick.items() if k not in PICK_COLUMNS}
+            conn.execute(
+                f"INSERT INTO picks(discovery_id, {', '.join(PICK_COLUMNS)}, detail_json)"
+                f" VALUES(?,{','.join('?' * len(PICK_COLUMNS))},?)",
+                (discovery_id, *(pick.get(c) for c in PICK_COLUMNS), json.dumps(detail)),
+            )
+        return discovery_id
+
+
+def _decode_pick(pick: dict) -> dict:
+    pick.update(json.loads(pick.pop("detail_json") or "{}"))
+    return pick
+
+
+def latest_discovery() -> dict | None:
+    found = one("SELECT * FROM discoveries ORDER BY id DESC LIMIT 1")
+    if not found:
+        return None
+    for key in ("regime", "stats", "short", "long"):
+        found[key] = json.loads(found.pop(f"{key}_json") or "null")
+    found["picks"] = [_decode_pick(p) for p in rows(
+        "SELECT * FROM picks WHERE discovery_id = ? ORDER BY category, conviction DESC, rank",
+        (found["id"],))]
+    return found
+
+
+def picks(limit: int = 200) -> list[dict]:
+    """Recommendations of every discovery run, newest first, with the run's date and model."""
+    found = rows(
+        "SELECT p.*, d.created_at, d.provider, d.model FROM picks p "
+        "JOIN discoveries d ON d.id = p.discovery_id ORDER BY p.id DESC LIMIT ?", (limit,))
+    return [_decode_pick(p) for p in found]
+
+
+def grade_pick(pick_id: int, final_date: str, final_return: float,
+               bench_return: float | None) -> None:
+    execute("UPDATE picks SET final_date = ?, final_return = ?, bench_return = ? WHERE id = ?",
+            (final_date, final_return, bench_return, pick_id))
 
 
 def has_analysis(ticker: str, run_date: str, provider: str) -> bool:

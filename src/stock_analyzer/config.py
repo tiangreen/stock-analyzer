@@ -38,6 +38,27 @@ DEFAULTS = {
         "portfolio_value": 0,
         "portfolio_currency": "EUR",
     },
+    "discovery": {
+        "regions": ["us", "de", "fr", "nl", "ch", "gb", "jp", "kr"],
+        "min_market_cap_usd": 2e9,
+        "min_dollar_volume_usd": 5e6,
+        "min_turnover": 0.00025,
+        "universe_size": {"us": 300, "default": 100},
+        "finalists": 40,
+        "shortlist": 12,
+        "max_shortlist_per_sector": 4,
+        "picks": 5,
+        "max_picks_per_sector": 2,
+        "min_conviction": 0.5,
+        "horizons": {"short": 20, "long": 120},
+        "llm_timeout": 600,
+        "weights": {
+            "short": {"momentum": 30, "revisions": 25, "drift": 15, "volume": 10,
+                      "catalyst": 10, "overextension": 10},
+            "long": {"quality": 30, "valuation": 25, "growth": 20, "estimates": 10,
+                     "trend": 10, "risk": 5},
+        },
+    },
 }
 
 
@@ -78,5 +99,12 @@ def load() -> dict:
         cfg["language"] = next(iter(LANGUAGES))
     if "schedule" in saved:
         cfg["schedule"] = _merge(cfg["schedule"], saved["schedule"])
+    # Discover: config.yaml lists the markets on offer, the dashboard picks among them.
+    discovery = cfg["discovery"] = dict(cfg["discovery"])
+    offered = list(dict.fromkeys(str(r).lower() for r in discovery["regions"] or []))
+    discovery["available_regions"] = offered
+    chosen = saved.get("discovery_regions")
+    chosen = [r for r in offered if r in chosen] if isinstance(chosen, list) else []
+    discovery["regions"] = chosen or offered
     cfg["horizons"] = sorted({int(h) for h in cfg["horizons"]})
     return cfg

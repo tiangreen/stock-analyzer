@@ -69,7 +69,17 @@ async function refreshStatus() {
 
   const banner = $("banner");
   const last = s.last_run;
-  if (s.running && last) {
+  const find = $("discover-run");   // exists while the Discover tab is drawn
+  if (find) {
+    const boxes = [...document.querySelectorAll("#view-discover input[data-market]")];
+    for (const box of boxes) box.disabled = state.busy;
+    find.disabled = state.busy || !boxes.some((box) => box.checked);
+    find.textContent = t(s.discovering ? "disc.searching" : "disc.find");
+  }
+  if (s.discovering && last) {
+    banner.hidden = false; banner.className = "";
+    banner.textContent = t("banner.discovering", { provider: last.provider, progress: last.progress || "" });
+  } else if (s.running && last) {
     banner.hidden = false; banner.className = "";
     // The server reports progress as "2/7 - analyzing AAPL".
     const step = /^(\d+\/\d+) - analyzing (.+)$/.exec(last.progress || "");
@@ -951,6 +961,261 @@ $("remove").addEventListener("click", async () => {
   await refreshWatchlist();
 });
 
+// --- discover: stock ideas chosen by the model -------------------------------
+
+// Pillars of the score per category, and the metrics a pick card shows: [metric, format].
+const PILLARS = {
+  short: ["momentum", "revisions", "drift", "volume", "catalyst", "overextension"],
+  long: ["quality", "valuation", "growth", "estimates", "trend", "risk"],
+};
+const PICK_METRICS = {
+  short: [["ret_1m", "pct"], ["rs_3m", "pct"], ["eps_rev_30d", "pct"], ["last_surprise", "pct"],
+    ["rsi14", "int"], ["volume_ratio", "times"], ["target_upside", "pct"], ["days_to_earnings", "days"]],
+  long: [["roe", "pct"], ["op_margin", "pct"], ["rev_growth", "pct"], ["earn_growth", "pct"],
+    ["forward_pe", "num"], ["peg", "num"], ["debt_equity", "share"], ["fcf_yield", "share"],
+    ["target_upside", "pct"], ["dividend_yield", "share"]],
+};
+const metricText = (v, kind) => (kind === "pct" ? pct(v, 1) : kind === "share" ? `${fmt(v, 1)}%`
+  : kind === "int" ? fmt(v, 0) : kind === "times" ? `${fmt(v, 1)}×`
+  : kind === "days" ? t("m.days", { n: v }) : fmt(v, 1));
+
+// `open` remembers which shortlist tables are unfolded across redraws.
+const disc = { data: null, perf: null, open: {}, adding: null, seq: 0 };
+
+const scoreColor = (v) => (v >= 66 ? "var(--up)" : v <= 33 ? "var(--down)" : "var(--flat)");
+const pillarBars = (category, pillars) => `<div class="pillars">${PILLARS[category].map((p) => `
+  <div title="${esc(fmt(pillars[p], 0))} / 100">${esc(t(`pillar.${p}`))}
+    <div class="bar" style="color:${scoreColor(pillars[p])}"><i style="width:${Math.round(pillars[p])}%"></i></div>
+  </div>`).join("")}</div>`;
+
+// A dropped pick, from its code and parameters (discovery.review on the server).
+const dropText = (d) => t(`drop.${d.code}`, { ...d, sector: d.sector || "" });
+
+function pickCard(p, category, size) {
+  const k = rateFor(p.currency);
+  const unit = k != null ? state.currency : p.currency || "";
+  const m = p.metrics || {};
+  const facts = PICK_METRICS[category].filter(([key]) => m[key] != null)
+    .map(([key, kind]) => `<span>${esc(t(`m.${key}`))}</span><span>${esc(metricText(m[key], kind))}</span>`).join("");
+  const list = (items) => `<ul>${items.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>`;
+  const perf = disc.perf && disc.perf.picks.find((r) => r.id === p.id);
+  const since = !perf || perf.return_pct == null ? ""
+    : `<span><span class="${sign(perf.return_pct)}">${pct(perf.return_pct)}</span>
+       <span class="muted">${esc(t(perf.final ? "disc.sinceFinal" : "disc.since", {
+         index: perf.index, bench: perf.bench_pct == null ? "–" : pct(perf.bench_pct), bars: perf.bars, n: perf.horizon_days }))}</span></span>`;
+  const listed = disc.data.watchlist.includes(p.ticker);
+  const action = listed
+    ? `<button data-open="${esc(p.ticker)}">${esc(t("disc.open"))}</button>`
+    : `<button data-add="${esc(p.ticker)}" ${disc.adding ? "disabled" : ""}>${esc(t(disc.adding === p.ticker ? "disc.adding" : "disc.add"))}</button>`;
+  return `<div class="pick">
+    <div class="analysis-head">
+      <strong>${esc(p.ticker)}</strong> <span>${esc(p.name || "")}</span>
+      <span class="muted">${esc([p.sector, p.industry].filter(Boolean).join(" · "))}</span>
+    </div>
+    <div class="muted">${esc(t("disc.conviction", { n: Math.round(p.conviction * 100) }))} ·
+      ${esc(t("disc.rank", { score: fmt(p.score, 0), rank: p.rank, n: size }))} ·
+      ${esc(t("disc.price", { price: fmt(p.base_close * (k ?? 1)), unit, date: p.base_date }))}</div>
+    <div class="bar"><i style="width:${Math.round(p.conviction * 100)}%"></i></div>
+    ${pillarBars(category, p.pillars || {})}
+    <p>${esc(p.thesis)}</p>
+    ${p.catalysts && p.catalysts.length ? `<h4>${esc(t("disc.catalysts"))}</h4>${list(p.catalysts)}` : ""}
+    ${p.risks && p.risks.length ? `<h4>${esc(t("disc.risks"))}</h4>${list(p.risks)}` : ""}
+    ${p.invalidation ? `<p><span class="muted">${esc(t("disc.invalidation"))}:</span> ${esc(p.invalidation)}</p>` : ""}
+    ${p.entry_note ? `<p><span class="muted">${esc(t("disc.entry"))}:</span> ${esc(p.entry_note)}</p>` : ""}
+    ${facts ? `<div class="kv">${facts}</div>` : ""}
+    <div class="pick-foot">${since || `<span class="muted">${esc(t("disc.sinceNone"))}</span>`}${action}</div>
+  </div>`;
+}
+
+function shortlistTable(category, result, picks) {
+  const picked = new Map(picks.map((p) => [p.ticker, p]));
+  const passed = new Map((result.passed_over || []).map((p) => [p.ticker, p.reason]));
+  const dropped = new Map((result.dropped || []).map((d) => [d.ticker, d]));
+  const view = (c) => (picked.has(c.ticker) ? `<span class="up">${esc(t("disc.picked", { n: Math.round(picked.get(c.ticker).conviction * 100) }))}</span>`
+    : dropped.has(c.ticker) ? esc(dropText(dropped.get(c.ticker)))
+    : esc(passed.get(c.ticker) || ""));
+  const rows = result.shortlist.map((c) => `<tr>
+    <td class="num">${c.rank}</td>
+    <td><strong>${esc(c.ticker)}</strong> <span class="muted">${esc(c.name || "")}</span></td>
+    <td>${esc(c.sector || "–")}</td>
+    <td class="num"><strong>${fmt(c.score, 0)}</strong></td>
+    ${PILLARS[category].map((p) => `<td class="num" style="color:${scoreColor(c.pillars[p])}">${fmt(c.pillars[p], 0)}</td>`).join("")}
+    <td class="num">${fmt(c.coverage * 100, 0)}%</td>
+    <td class="wrap">${view(c)}</td></tr>`).join("");
+  const th = (text, num) => `<th${num ? ' class="num"' : ""}>${esc(text)}</th>`;
+  return `<details data-list="${category}" ${disc.open[category] ? "open" : ""}>
+    <summary>${esc(t(`disc.${category}`))}: ${esc(t("disc.shortlist", { n: result.shortlist.length }))}</summary>
+    <div class="table-wrap"><table>
+      <tr>${th("#", 1)}${th(t("th.stock"))}${th(t("th.sector"))}${th(t("th.score"), 1)}
+      ${PILLARS[category].map((p) => th(t(`pillar.${p}`), 1)).join("")}${th(t("disc.coverage"), 1)}${th(t("disc.modelView"))}</tr>
+      ${rows}</table></div>
+  </details>`;
+}
+
+function discoverColumn(category, latest) {
+  const result = latest[category];
+  const picks = latest.picks.filter((p) => p.category === category);
+  if (!result) return "";
+  const notShown = [...(result.dropped || []).map(dropText),
+    ...(result.unknown || []).map((ticker) => t("drop.unknown", { ticker }))];
+  return `<div class="card">
+    <div class="analysis-head"><h3 style="margin:0">${esc(t(`disc.${category}`))}</h3>
+      <span class="muted">${esc(t(`disc.${category}Sub`))}</span></div>
+    ${result.error ? `<p class="error">${esc(t("disc.failed", { error: result.error }))}</p>` : ""}
+    ${result.market_view ? `<p>${esc(result.market_view)}</p>` : ""}
+    ${picks.map((p) => pickCard(p, category, result.shortlist.length)).join("")
+      || (result.error ? "" : `<p class="muted">${esc(t("disc.noPicks"))}</p>`)}
+    ${notShown.length ? `<p class="muted note">${esc(t("disc.dropped", { items: notShown.join("; ") }))}</p>` : ""}
+  </div>`;
+}
+
+// The shortlists the picks were chosen from, full width below the two columns.
+function shortlistCard(latest) {
+  const tables = ["short", "long"].filter((c) => latest[c] && latest[c].shortlist.length).map((c) =>
+    shortlistTable(c, latest[c], latest.picks.filter((p) => p.category === c))).join("");
+  return tables ? `<div class="card">${tables}<p class="muted note">${esc(t("disc.scoreNote"))}</p></div>` : "";
+}
+
+function regimeLine(r) {
+  if (!r) return "";
+  const indexes = r.indexes.map((i) => `<span title="${esc(t(i.above_sma200 ? "disc.above200" : "disc.below200"))}">
+    ${esc(i.index)} <span class="${sign(i.ret_1m)}">${pct(i.ret_1m, 1)}</span> ${i.above_sma200 == null ? "" : i.above_sma200 ? "▲" : "▼"}</span>`).join("");
+  return `<div class="regime">
+    <span>${esc(t("disc.regime"))} <span class="badge ${esc(r.label)}">${esc(term("regime", r.label))}</span></span>
+    ${indexes}
+    ${r.vix == null ? "" : `<span class="muted">${esc(t("disc.vix", { v: fmt(r.vix, 1) }))}</span>`}
+    ${r.us_10y_yield == null ? "" : `<span class="muted">${esc(t("disc.us10y", { v: fmt(r.us_10y_yield, 2) }))}</span>`}
+    <span class="muted">${esc(t("disc.regimeNote"))}</span>
+  </div>`;
+}
+
+function recordCard() {
+  const perf = disc.perf;
+  if (!perf) return `<div class="card"><h3>${esc(t("disc.record"))}</h3><p class="muted">${esc(t(disc.perfFailed ? "disc.recordFailed" : "disc.recordLoading"))}</p></div>`;
+  const lines = perf.summary.map((s) => t(s.finished ? "disc.recordLine" : "disc.recordOpen", {
+    category: t(`disc.${s.category}`), provider: s.provider, n: s.picks, beat: s.beat_index,
+    finished: s.finished, avg: s.avg_excess_pct == null ? "–" : pct(s.avg_excess_pct) }));
+  const rows = perf.picks.map((r) => {
+    const k = rateFor(r.currency);
+    return `<tr>
+      <td>${esc(r.created_at.slice(0, 10))}</td><td>${esc(t(`disc.${r.category}`))}</td>
+      <td><strong>${esc(r.ticker)}</strong> <span class="muted">${esc(r.name || "")}</span></td>
+      <td title="${esc(r.model || "")}">${esc(r.provider)}</td>
+      <td class="num">${Math.round(r.conviction * 100)}%</td>
+      <td class="num">${fmt(r.base_close * (k ?? 1))} <span class="unit">${esc(k != null ? state.currency : r.currency || "")}</span></td>
+      <td class="num ${sign(r.return_pct)}">${r.return_pct == null ? "–" : pct(r.return_pct)}</td>
+      <td class="num">${r.bench_pct == null ? "–" : pct(r.bench_pct)} <span class="unit">${esc(r.index)}</span></td>
+      <td class="num ${sign(r.excess_pct)}">${r.excess_pct == null ? "–" : pct(r.excess_pct)}</td>
+      <td>${r.final ? `<span class="badge final">${esc(t("disc.statusFinal"))}</span>`
+        : `<span class="muted">${esc(t("disc.statusDay", { bars: r.bars, n: r.horizon_days }))}</span>`}</td>
+    </tr>`; }).join("");
+  const th = (key, num) => `<th${num ? ' class="num"' : ""}>${esc(t(key))}</th>`;
+  const h = disc.data.limits.horizons;
+  return `<div class="card"><h3>${esc(t("disc.record"))}</h3>
+    ${rows ? `${lines.map((l) => `<p>${esc(l)}</p>`).join("")}<div class="table-wrap"><table>
+      <tr>${th("th.date")}${th("th.list")}${th("th.stock")}${th("th.model")}${th("th.conviction", 1)}
+      ${th("th.startPrice", 1)}${th("th.return", 1)}${th("th.index", 1)}${th("th.vsIndex", 1)}${th("th.status")}</tr>
+      ${rows}</table></div>` : `<p class="muted">${esc(t("disc.recordNone"))}</p>`}
+    <p class="muted note">${esc(t("disc.recordNote", { short: h.short, long: h.long }))}</p>
+  </div>`;
+}
+
+function drawDiscover() {
+  const d = disc.data;
+  if (!d) return;
+  const latest = d.latest;
+  const s = state.status || {};
+  const stats = latest && latest.stats ? latest.stats : {};
+  // Markets the next search covers: one or any combination. The choice is saved at once.
+  const markets = d.markets.map((m) => `<label title="${esc(m.index)}">
+    <input type="checkbox" data-market="${esc(m.region)}" ${m.selected ? "checked" : ""} ${state.busy ? "disabled" : ""}>
+    ${esc(term("region", m.region))}</label>`).join("");
+  const none = !d.markets.some((m) => m.selected);
+  const covered = Object.entries(stats.regions || {}).map(([r, n]) => `${term("region", r)} ${n}`).join(" · ");
+  $("view-discover").innerHTML = `
+    <div class="card">
+      <div class="analysis-head">
+        <h3 style="margin:0">${esc(t("disc.title"))}</h3>
+        <button id="discover-run" class="primary" ${state.busy || none ? "disabled" : ""}>${esc(t(s.discovering ? "disc.searching" : "disc.find"))}</button>
+        ${latest ? `<span class="muted">${esc(t("disc.meta", { date: latest.created_at.replace("T", " ").slice(0, 16),
+          model: `${latest.provider} / ${latest.model}${latest.effort ? " · " + latest.effort : ""}`,
+          universe: stats.universe ?? "–", finalists: stats.finalists ?? "–" }))}</span>` : ""}
+      </div>
+      <div id="discover-error" class="error" hidden></div>
+      <p class="muted" style="margin:0">${esc(t("disc.hint"))}</p>
+      <div class="markets"><span class="muted">${esc(t("disc.markets"))}</span>${markets}
+        ${none ? `<span class="error" style="margin:0">${esc(t("disc.marketsNone"))}</span>` : ""}</div>
+      ${covered ? `<div class="muted note">${esc(t("disc.covered", { markets: covered }))}</div>` : ""}
+      ${latest ? regimeLine(latest.regime) : ""}
+    </div>
+    ${latest ? `<div class="disc-grid">${discoverColumn("short", latest)}${discoverColumn("long", latest)}</div>${shortlistCard(latest)}${recordCard()}`
+      : `<p class="muted">${esc(t("disc.none"))}</p>`}
+    <p class="muted note">${esc(t("disc.disclaimer"))}</p>`;
+}
+
+async function renderDiscover() {
+  const seq = ++disc.seq;
+  disc.data = await api("/api/discover");
+  if (seq !== disc.seq) return;
+  drawDiscover();
+  if (!disc.data.latest) return;
+  // Returns since each pick need fresh prices; they arrive after the page is drawn.
+  const perf = await api("/api/discover/performance").catch(() => null);
+  if (seq !== disc.seq) return;
+  disc.perf = perf || disc.perf;
+  disc.perfFailed = !perf;
+  drawDiscover();
+}
+
+$("view-discover").addEventListener("toggle", (e) => {
+  if (e.target.dataset && e.target.dataset.list) disc.open[e.target.dataset.list] = e.target.open;
+}, true);
+
+$("view-discover").addEventListener("change", async (e) => {
+  const box = e.target.closest("input[data-market]");
+  if (!box) return;
+  const market = disc.data.markets.find((m) => m.region === box.dataset.market);
+  market.selected = box.checked;
+  const chosen = disc.data.markets.filter((m) => m.selected).map((m) => m.region);
+  drawDiscover();
+  if (!chosen.length) return;   // nothing to search: not saved, the button stays off
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ discovery_regions: chosen }) });
+  } catch (err) {
+    await renderDiscover().catch(() => {});
+    $("discover-error").textContent = err.message;
+    $("discover-error").hidden = false;
+  }
+});
+
+$("view-discover").addEventListener("click", async (e) => {
+  if (e.target.id === "discover-run") {
+    try { await api("/api/discover", { method: "POST" }); }
+    catch (err) { $("discover-error").textContent = err.message; $("discover-error").hidden = false; }
+    refreshStatus();
+    return;
+  }
+  const open = e.target.closest("button[data-open]");
+  if (open) { showView("stocks"); selectTicker(open.dataset.open); return; }
+  const add = e.target.closest("button[data-add]");
+  if (!add || disc.adding) return;
+  disc.adding = add.dataset.add;
+  drawDiscover();
+  try {
+    await api("/api/watchlist", { method: "POST", body: JSON.stringify({ ticker: disc.adding }) });
+    disc.data.watchlist.push(disc.adding);
+    disc.adding = null;
+    await refreshRates().catch(() => {});
+    await refreshWatchlist();
+    drawDiscover();
+  } catch (err) {
+    disc.adding = null;
+    drawDiscover();
+    $("discover-error").textContent = err.message;
+    $("discover-error").hidden = false;
+  }
+});
+
 // --- accuracy and runs views ------------------------------------------------
 
 async function renderAccuracy() {
@@ -981,8 +1246,9 @@ async function renderRuns() {
 
 function showView(name) {
   for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t.dataset.view === name);
-  for (const view of ["stocks", "signals", "accuracy", "runs", "settings"]) $(`view-${view}`).hidden = view !== name;
+  for (const view of ["stocks", "signals", "discover", "accuracy", "runs", "settings"]) $(`view-${view}`).hidden = view !== name;
   if (name === "signals") renderSignals();
+  if (name === "discover") renderDiscover();
   if (name === "accuracy") renderAccuracy();
   if (name === "runs") renderRuns();
   if (name === "settings") { renderSettings(); refreshAuth(true).then(renderSettings).catch(() => {}); }
@@ -998,6 +1264,7 @@ async function refreshAll() {
   await refreshWatchlist();
   await loadStock();
   if (!$("view-signals").hidden) renderSignals();
+  if (!$("view-discover").hidden) renderDiscover();
   if (!$("view-accuracy").hidden) renderAccuracy();
   if (!$("view-runs").hidden) renderRuns();
 }

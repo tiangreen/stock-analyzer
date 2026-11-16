@@ -124,6 +124,8 @@ Good to know:
   Run now always analyze the last finished session.
 - **Signals** lists the latest trade signal (buy, sell or hold) per stock and how past signals
   turned out (see "Trade signals" below).
+- **Discover** recommends stocks you do not track yet, short-term and long-term (see
+  "Discover" below).
 - **Accuracy** shows hit rates per model, horizon and stock. **Runs** shows the run log.
 
 Run from the command line instead:
@@ -176,6 +178,78 @@ order and has no connection to any broker.
 
 Prices are the previous close from Yahoo Finance; check the live price before ordering.
 
+## Discover
+
+The **Discover** tab finds stocks outside the watchlist and has the model recommend up to five
+for the **short term** (1 to 4 weeks) and five for the **long term** (6 to 24 months).
+**Find stocks** starts a search; it takes a few minutes and two model calls. Nothing runs by
+schedule.
+
+**Markets to search**: tick one market or any combination (US, Germany, France, Netherlands,
+Switzerland, UK, Japan, Korea). The choice is remembered. Stocks are ranked inside their own
+market first, so with one market ticked the shortlists hold only that market's stocks, and
+with several the best of each compete. `discovery.regions` in `config.yaml` sets which
+markets are on offer.
+
+From the command line: `python -m stock_analyzer.discovery [--provider codex] [--region de
+--region fr]`. Without `--region` it searches the markets ticked in the dashboard.
+
+The model CLIs have no web access, so the model cannot research the market itself. Code
+collects and scores the evidence, the model chooses, and fixed rules check its choice:
+
+1. **Universe**: Yahoo's screener lists the largest stocks on the home exchanges of each
+   selected market above a market cap and a daily traded value. Regional screens are full of
+   foreign cross-listings (Apple on Xetra); those are dropped because they hardly trade
+   compared with their market cap (`min_turnover`). Share classes and double listings collapse
+   to the most traded line. About 800 stocks.
+2. **Price factors** for all of them from one year of daily bars: returns over 1, 3 and 6
+   months, 12-1 month momentum, strength against the home index, trend against the 50- and
+   200-day averages, distance to the 52-week high, volatility, drawdown, RSI, unusual volume.
+3. **Finalists**: a first ranking inside each region (a stock competes with its own market)
+   selects 40 stocks per category. For the long term it leans on fundamentals: two more
+   screens flag quality (return on equity, low debt, margin) and growth (earnings and revenue).
+4. **Full data** for the finalists: margins, return on equity, free cash flow, debt, valuation
+   ratios, analysts' EPS estimates and how they changed over 30 and 90 days, earnings
+   surprises, rating changes, the next earnings date and headlines.
+5. **Scores**: each pillar is a percentile from 0 to 100 among the finalists; the weights are
+   in `config.yaml`.
+
+   | Long-term | Weight | | Short-term | Weight |
+   |-----------|--------|-|------------|--------|
+   | Quality (ROE, margins, cash flow, leverage) | 30 | | Momentum (vs index, trend, 52-week high) | 30 |
+   | Valuation (earnings and cash-flow yield, EV/EBITDA, PEG; against sector peers) | 25 | | Revisions (EPS estimates and ratings, 30 days) | 25 |
+   | Growth (revenue, earnings, forward estimates) | 20 | | Earnings drift (last surprise, fading with time) | 15 |
+   | Estimates (90-day revisions, analyst target) | 10 | | Volume (unusual volume on rising prices) | 10 |
+   | Trend (12-1 momentum, 200-day average) | 10 | | Catalyst (earnings date ahead, fresh news) | 10 |
+   | Risk (volatility, beta, drawdown) | 5 | | Overextension (penalty for a stretched price) | 10 |
+
+   Stocks with losses and no free cash flow, with debt above three times equity (financials
+   excepted) or without fundamentals data are excluded. The best 12 per category, at most 4
+   from one sector, form the shortlist.
+6. **The model's choice**: per category the model gets the shortlist with all scores and
+   figures, each company's description and headlines, and the market regime (each index
+   against its 200-day average, VIX, US 10-year yield). It is asked to weigh what the scores
+   cannot see, such as one-off earnings, value traps, event risk and how durable the business
+   is, and may recommend fewer than five stocks or none. For each pick it gives a conviction,
+   a thesis, catalysts, risks, what would prove it wrong and a note on the entry.
+7. **Rules** (`discovery.review`): a pick must be on the shortlist, reach `min_conviction`,
+   and there are at most two picks per sector and five per category. What the rules dropped
+   is listed with the reason.
+
+Each pick shows its score and pillar bars, and **Add to watchlist** puts it into the daily
+analysis. The unfolded shortlist table shows every candidate with its scores and why the model
+passed it over.
+
+**Track record**: a pick stores its price on the day it was made and is graded against its
+home index (S&P 500, DAX, CAC 40, AEX, SMI, FTSE 100, Nikkei 225, KOSPI) after 20 trading
+days (short-term) or 120 (long-term); until then the tab shows the return so far. Returns are
+price changes in the stock's own currency; fees, taxes and currency moves are ignored.
+
+Limits: scores are ranks among the candidates, not valuations. Yahoo's data is unofficial,
+sometimes wrong and thinner outside the US (the Data column shows how much was available).
+The model sees only what the prompt contains, and its own knowledge of a company can be out
+of date. Treat a pick as a starting point for your own research.
+
 ## Notes
 
 - Markets close at different times (Seoul and Tokyo in the European morning, Europe in the
@@ -195,6 +269,7 @@ are delayed for most non-US markets).
 - Yahoo Finance data is free and unofficial: quotes can be delayed by 15 minutes or more and
   the service occasionally rate-limits.
 - Each analysis is one model call per stock per day, counted against your subscription limits.
+  A Discover search is two more.
 - Output is informational only and is not investment advice. Language models cannot reliably
   predict prices; use the Accuracy tab to judge how much weight the forecasts deserve.
 

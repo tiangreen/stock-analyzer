@@ -23,8 +23,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import (analyzer, config, data, db, fx, indicators, runner, scheduler, scoring, signals,
-               tradingview)
+from . import (analyzer, config, data, db, discovery, fx, indicators, runner, scheduler, scoring,
+               signals, tradingview)
 from .llm import PROVIDERS, LLMError
 from .llm.base import cancel_login, submit_login_code
 
@@ -103,6 +103,7 @@ class SettingsIn(BaseModel):
     provider: str | None = None
     currency: str | None = None
     language: str | None = None
+    discovery_regions: list[str] | None = None
 
 
 # --- status and settings --------------------------------------------------
@@ -121,6 +122,8 @@ def status():
                       for n, cls in PROVIDERS.items()},
         "horizons": cfg["horizons"],
         "running": runner.is_running(),
+        "discovering": bool(runner.is_running() and last and last["status"] == "running"
+                            and last["trigger"] == "discover"),
         "analyzing": sorted(_single_active),
         "errors": dict(_single_errors),
         "last_run": last,
@@ -140,18 +143,32 @@ def put_settings(body: SettingsIn):
         if body.language.lower() not in config.LANGUAGES:
             raise HTTPException(400, f"Language must be one of {tuple(config.LANGUAGES)}")
         db.set_setting("language", body.language.lower())
+    if body.discovery_regions is not None:
+        offered = _markets(config.load())
+        chosen = [r for r in offered if r in {str(c).lower() for c in body.discovery_regions}]
+        if not chosen:
+            raise HTTPException(400, f"Select at least one market of {offered}")
+        db.set_setting("discovery_regions", chosen)
     cfg = config.load()
     return {"provider": cfg["provider"], "currency": cfg["display_currency"],
-            "language": cfg["language"]}
+            "language": cfg["language"], "discovery_regions": cfg["discovery"]["regions"]}
+
+
+def _markets(cfg: dict) -> list[str]:
+    """The markets a discovery can cover: those in config.yaml that are supported."""
+    return [r for r in cfg["discovery"]["available_regions"] if r in discovery.REGIONS]
 
 
 @app.get("/api/fx")
 def get_fx(to: str | None = None):
-    """Rates from each watchlist currency into the display currency (None if unknown)."""
+    """Rates from each watchlist and recommended stock's currency into the display currency
+    (None if unknown)."""
     to = (to or config.load()["display_currency"]).upper()
     if to not in config.DISPLAY_CURRENCIES:
         raise HTTPException(400, f"Currency must be one of {config.DISPLAY_CURRENCIES}")
-    return {"to": to, "rates": fx.rates([w["currency"] for w in db.watchlist()], to)}
+    currencies = [w["currency"] for w in db.watchlist()]
+    currencies += [r["currency"] for r in db.rows("SELECT DISTINCT currency FROM picks")]
+    return {"to": to, "rates": fx.rates(currencies, to)}
 
 
 @app.put("/api/schedule")
@@ -452,6 +469,40 @@ def get_signals():
         "summary": signals.summarize(history),
         "limits": config.load()["signals"],
     }
+
+
+# --- discovery ------------------------------------------------------------
+
+@app.post("/api/discover")
+def discover(provider: str | None = None):
+    """Screen the markets and let the model recommend stocks (two model calls)."""
+    provider = _provider(provider)
+    if _single_active or not runner.start_discovery(trigger="manual", provider=provider):
+        raise HTTPException(409, "An analysis is already in progress")
+    return {"started": True, "provider": provider}
+
+
+@app.get("/api/discover")
+def get_discovery():
+    """The latest discovery run: picks per category, the shortlists they were chosen from
+    and the market regime. `latest` is None before the first run. `markets` are the markets
+    the next search can cover and whether each is selected."""
+    cfg = config.load()
+    limits = cfg["discovery"]
+    return {
+        "latest": db.latest_discovery(),
+        "watchlist": [w["ticker"] for w in db.watchlist()],
+        "markets": [{"region": r, "index": discovery.REGIONS[r]["index"],
+                     "selected": r in limits["regions"]} for r in _markets(cfg)],
+        "limits": {k: limits[k] for k in ("picks", "max_picks_per_sector", "min_conviction",
+                                          "horizons", "shortlist", "weights")},
+    }
+
+
+@app.get("/api/discover/performance")
+def discovery_performance():
+    """Every recommended stock's return since it was picked, against its home index."""
+    return discovery.performance()
 
 
 # --- stopping the app -----------------------------------------------------
