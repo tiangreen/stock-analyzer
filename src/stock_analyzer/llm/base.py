@@ -33,10 +33,17 @@ class Provider:
     executable = ""
     login_hint = ""
 
-    def __init__(self, model: str = "", timeout: int = 300, effort: str = ""):
+    def __init__(self, model: str = "", timeout: int = 300, effort: str = "",
+                 tradingview: dict | None = None):
         self.model = model or ""      # "" = let the CLI use its own default
         self.effort = effort or ""    # "" = the model's default reasoning effort
         self.timeout = timeout
+        # config's tradingview_mcp section; None = no TradingView tools for this call
+        self.tradingview = tradingview if tradingview and tradingview.get("enabled") else None
+
+    def tradingview_ready(self) -> bool:
+        """True if this call can reach the read-only TradingView MCP tools."""
+        return False
 
     # --- model and effort choices -----------------------------------------
 

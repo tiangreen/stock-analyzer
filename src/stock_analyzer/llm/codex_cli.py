@@ -9,10 +9,13 @@ from pathlib import Path
 import subprocess
 import time
 
+from .. import tradingview
 from .base import NO_WINDOW, SYSTEM_PROMPT, LLMError, Provider
 
 MODELS_TTL = 3600
 _models_cache: tuple[float, list[dict]] | None = None
+SERVER_TTL = 600
+_servers: dict[str, tuple[float, bool]] = {}  # MCP server name -> (checked at, usable)
 
 
 def parse_models(text: str) -> list[dict]:
@@ -69,6 +72,28 @@ class CodexCLI(Provider):
         # offers "CLI default" and a custom model name.
         return _models_cache[1] if _models_cache else []
 
+    def tradingview_ready(self) -> bool:
+        """True if Codex has the TradingView MCP server configured and switched on
+        (`codex mcp add`), checked with `codex mcp get` at most every ten minutes."""
+        if self.tradingview is None:
+            return False
+        server = self.tradingview["codex_server"]
+        cached = _servers.get(server)
+        if cached and time.monotonic() - cached[0] < SERVER_TTL:
+            return cached[1]
+        try:
+            proc = subprocess.run(
+                [self.find(), "mcp", "get", server, "--json"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+                cwd=tempfile.gettempdir(), env=self.child_env(), timeout=30,
+                creationflags=NO_WINDOW,
+            )
+            usable = proc.returncode == 0 and bool(json.loads(proc.stdout).get("enabled"))
+        except Exception:
+            usable = False
+        _servers[server] = (time.monotonic(), usable)
+        return usable
+
     def cli_args(self, schema_path: str, answer_path: str) -> list[str]:
         args = [
             "exec",
@@ -83,6 +108,12 @@ class CodexCLI(Provider):
             # Unquoted on purpose: Codex reads a non-TOML value as a plain string, and quotes
             # would not survive the Windows .cmd shim.
             args += ["-c", f"model_reasoning_effort={self.effort}"]
+        if self.tradingview_ready():
+            # Only the read-only TradingView tools. TOML literal strings ('...') because
+            # double quotes would not survive the Windows .cmd shim.
+            server = self.tradingview["codex_server"]
+            tools = ",".join(f"'{tool}'" for tool in tradingview.READ_TOOLS)
+            args += ["-c", f"mcp_servers.{server}.enabled_tools=[{tools}]"]
         args.append("-")  # prompt on stdin
         return args
 

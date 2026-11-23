@@ -305,22 +305,43 @@ sometimes wrong and thinner outside the US (the Data column shows how much was a
 The model sees only what the prompt contains, and its own knowledge of a company can be out
 of date. Treat a pick as a starting point for your own research.
 
+## TradingView
+
+**TradingView MCP**: when the analysis runs through the Claude or Codex CLI and TradingView's
+official MCP server (`https://mcp.tradingview.com/mcp`) is connected there, the model checks
+each stock on TradingView before it answers: the current quote, the technicals rating on the
+daily and 4-hour timeframes and recent news. Yahoo Finance still supplies the history,
+indicators and the prices forecasts are graded against; TradingView adds to it.
+
+- Claude: connect TradingView as a connector in your Claude account. `claude mcp list` then
+  shows `claude.ai TradingView MCP`.
+- Codex: add the server once, then sign in to TradingView in the browser:
+
+  ```powershell
+  codex mcp add tradingview --url https://mcp.tradingview.com/mcp
+  ```
+
+  ```powershell
+  codex mcp login tradingview
+  ```
+
+The model may call only read-only tools (quotes, bars, ratings, news, symbol search, economic
+data); alerts, watchlists and Pine scripts stay out of reach. Without the connection an
+analysis works as before. Switch it off or rename the servers under `tradingview_mcp` in
+`config.yaml`. API providers never use it. The calls make an analysis slower and use more of
+your subscription.
+
+**Open in TradingView** opens the selected stock's chart on tradingview.com in your own
+logged-in session: your saved layouts and indicators, alerts, more history, and real-time
+quotes for the exchanges whose data packages you have (Yahoo's quotes are delayed for most
+non-US markets).
+
 ## Notes
 
 - Markets close at different times (Seoul and Tokyo in the European morning, Europe in the
   late afternoon, the US at night). A bar from a session that is still open is left out, so
   every stock is analyzed and graded on its last finished day whenever the run happens. The
   default 22:30 suits Central European time: all of these markets are closed by then.
-
-## TradingView
-
-A TradingView subscription cannot serve as this app's data source: TradingView offers no data
-API to subscribers and its terms forbid automated data collection (scripts, scraping,
-unofficial APIs), with account bans as the penalty. Its REST API is for brokers only. So the
-analysis keeps using Yahoo Finance, and the integration is the **Open in TradingView** link,
-which is where the subscription pays off: your saved layouts and indicators, alerts, more
-history, and real-time quotes for the exchanges whose data packages you have (Yahoo's quotes
-are delayed for most non-US markets).
 - Yahoo Finance data is free and unofficial: quotes can be delayed by 15 minutes or more and
   the service occasionally rate-limits.
 - Each analysis is one model call per stock per day, counted against your subscription limits

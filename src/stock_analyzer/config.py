@@ -17,6 +17,7 @@ DB_PATH = DATA_DIR / "analyzer.db"
 PROVIDERS = ("claude", "codex")  # the subscription CLIs; API providers come from config.yaml
 API_TYPES = {"anthropic": "Anthropic API", "openai": "OpenAI API"}  # type -> default label
 API_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,30}")
+MCP_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")  # it becomes part of a CLI argument
 ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 RESPONSE_FORMATS = ("none", "json_object", "json_schema")
 log = logging.getLogger(__name__)
@@ -39,6 +40,10 @@ DEFAULTS = {
     "horizons": [1, 5, 20],
     "history_period": "2y",
     "llm_timeout": 300,
+    # TradingView MCP tools the model may call during an analysis (subscription CLIs only).
+    # The server names are how each CLI calls the connected TradingView MCP server.
+    "tradingview_mcp": {"enabled": True, "claude_server": "claude_ai_TradingView_MCP",
+                        "codex_server": "tradingview"},
     "schedule": {"enabled": True, "time": "22:30", "weekdays_only": True},
     "server": {"host": "127.0.0.1", "port": 8765},
     "signals": {
@@ -217,5 +222,13 @@ def load() -> dict:
     chosen = saved.get("discovery_regions")
     chosen = [r for r in offered if r in chosen] if isinstance(chosen, list) else []
     discovery["regions"] = chosen or offered
+    tv = cfg["tradingview_mcp"] = dict(cfg["tradingview_mcp"] or {})
+    tv["enabled"] = bool(tv.get("enabled"))
+    for key in ("claude_server", "codex_server"):
+        name = str(tv.get(key) or "")
+        if not MCP_NAME_RE.fullmatch(name):
+            _warn(f"tradingview_mcp.{key} '{name}' ignored: use letters, digits, _ and -")
+            name = DEFAULTS["tradingview_mcp"][key]
+        tv[key] = name
     cfg["horizons"] = sorted({int(h) for h in cfg["horizons"]})
     return cfg
