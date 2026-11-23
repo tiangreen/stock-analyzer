@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 
+from .. import tradingview
 from .base import SYSTEM_PROMPT, LLMError, Provider
 
 # Kept so a long-lived token from `claude setup-token` or a custom config dir still works.
@@ -39,14 +40,26 @@ class ClaudeCLI(Provider):
         # each resolving to the newest model of that family.
         return [{"id": m, "label": label, "efforts": EFFORTS} for m, label in MODELS]
 
+    def tradingview_ready(self) -> bool:
+        # The connector is set up in Claude itself; if it is missing the model just has no
+        # such tools and the prompt tells it to carry on without them.
+        return self.tradingview is not None
+
     def cli_args(self) -> list[str]:
         args = [
             "-p", "--output-format", "json",
-            "--tools", "",                 # pure completion: no file, shell or web tools
-            "--strict-mcp-config",         # no MCP servers
+            "--tools", "",                 # no file, shell or web tools
             "--no-session-persistence",
             "--system-prompt", SYSTEM_PROMPT,
         ]
+        if self.tradingview_ready():
+            # MCP servers load, but only the read-only TradingView tools may run; dontAsk
+            # refuses every other tool instead of waiting for an approval nobody gives.
+            server = self.tradingview["claude_server"]
+            args += ["--permission-mode", "dontAsk", "--allowedTools",
+                     ",".join(f"mcp__{server}__{tool}" for tool in tradingview.READ_TOOLS)]
+        else:
+            args.append("--strict-mcp-config")  # no MCP servers: a pure completion
         if self.model:
             args += ["--model", self.model]
         if self.effort:

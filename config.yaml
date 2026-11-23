@@ -114,6 +114,14 @@ history_period: 2y
 # Seconds to wait for one model call.
 llm_timeout: 300
 
+# TradingView MCP: with the Claude or Codex CLI, the model checks each stock on TradingView
+# (quote, technicals rating, news) through read-only tools before it answers. Works once the
+# server is connected in that CLI; see "TradingView" in the README.
+tradingview_mcp:
+  enabled: true
+  claude_server: claude_ai_TradingView_MCP   # as in the tool names: mcp__<server>__mcp-tv-...
+  codex_server: tradingview                  # the name given to `codex mcp add`
+
 # Daily run, fired by the dashboard server while it is running (local time).
 schedule:
   enabled: true

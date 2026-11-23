@@ -5,7 +5,7 @@ import json
 
 import numpy as np
 
-from . import config, data, db, indicators, prompt, scoring, signals
+from . import config, data, db, indicators, prompt, scoring, signals, tradingview
 from .llm import get_provider
 
 MIN_BARS = 60
@@ -59,9 +59,11 @@ def analyze_ticker(ticker: str, provider_name: str, cfg: dict, force: bool = Fal
     horizons = cfg["horizons"]
     model = cfg["models"].get(provider_name, "")
     effort = cfg["efforts"].get(provider_name, "")
-    provider = get_provider(provider_name, model, cfg["llm_timeout"], effort)
+    provider = get_provider(provider_name, model, cfg["llm_timeout"], effort, cfg=cfg,
+                            tradingview=cfg.get("tradingview_mcp"))
+    tools = tradingview.prompt_section(ticker) if provider.tradingview_ready() else ""
     text = prompt.build(ticker, info, prices, snap, news, past, horizons,
-                        config.LANGUAGES[cfg.get("language", "en")], live=live)
+                        config.LANGUAGES[cfg.get("language", "en")], live=live, tools=tools)
     result, raw = provider.analyze(text, prompt.schema(horizons), horizons)
     result["signal"] = signals.review(result["signal"], reference, result["predictions"],
                                       cfg["signals"], live=bool(live))
@@ -76,4 +78,4 @@ def analyze_ticker(ticker: str, provider_name: str, cfg: dict, force: bool = Fal
     )
     return {"status": "done", "ticker": ticker, "run_date": run_date,
             "analysis_id": analysis_id, "trend": result["trend"],
-            "signal": (result["signal"] or {}).get("action")}
+            "signal": (result["signal"] or {}).get("action"), "tradingview": bool(tools)}
