@@ -58,13 +58,40 @@ def session_unfinished(last_bar, session: dict | None, now=None) -> bool:
         return False
 
 
+HOURLY_BARS = 40       # about a week of 1-hour bars on a 6.5-hour exchange
+FOUR_HOUR_BARS = 60    # about six weeks of 4-hour bars
+
+
+def _bar(idx, r, fmt: str) -> dict:
+    return {"time": idx.strftime(fmt), "open": float(r.Open), "high": float(r.High),
+            "low": float(r.Low), "close": float(r.Close), "volume": float(r.Volume or 0)}
+
+
+def four_hour(hourly: pd.DataFrame) -> pd.DataFrame:
+    """1-hour bars combined into 4-hour bars. Each session is cut into blocks of four hours
+    from its own first bar, so no block spans the overnight gap; the last one can be shorter."""
+    if hourly is None or hourly.empty:
+        return hourly
+    index = pd.DatetimeIndex(hourly.index)
+    days = index.normalize()
+    first = pd.Series(index, index=index).groupby(days).transform("min")
+    block = ((index - pd.DatetimeIndex(first)) // pd.Timedelta(hours=4)).to_numpy()
+    groups = hourly.groupby([days, block], sort=True)
+    out = pd.DataFrame({"Open": groups["Open"].first(), "High": groups["High"].max(),
+                        "Low": groups["Low"].min(), "Close": groups["Close"].last(),
+                        "Volume": groups["Volume"].sum()})
+    out.index = pd.DatetimeIndex(groups.apply(lambda g: g.index[0]).to_list())
+    return out
+
+
 def live_session(ticker: str, now=None, bars: bool = True) -> dict | None:
-    """The exchange's current, unfinished session: the live price, today's bar so far and its
-    15-minute bars, in the exchange's own time. None while the exchange is closed.
+    """The exchange's current, unfinished session: the live price, today's bar so far, its
+    15-minute bars, and recent 1-hour and 4-hour bars up to now, in the exchange's own time.
+    None while the exchange is closed.
 
     Read straight from Yahoo and never cached: the stored daily series holds finished
     sessions only. Quotes can be delayed by the exchange (often 15 minutes).
-    `bars=False` skips the 15-minute bars: one request, for the dashboard's live quote."""
+    `bars=False` skips the intraday bars: one request, for the dashboard's live quote."""
     try:
         source = yf.Ticker(ticker)
         daily = source.history(period="5d", interval="1d", auto_adjust=True)
@@ -86,18 +113,25 @@ def live_session(ticker: str, now=None, bars: bool = True) -> dict | None:
         now = now.tz_convert(end.tz)
     day = pd.Timestamp(daily.index[-1]).date()
     today, previous = daily.iloc[-1], daily.iloc[-2]
-    intraday = None
-    if bars:
+    intraday = hourly = None
+    if bars:  # the intraday bars are a bonus; the live price is what matters
         try:
             intraday = source.history(period="1d", interval="15m", auto_adjust=True)
             intraday = intraday.dropna(subset=["Close"])
-        except Exception:  # the intraday bars are a bonus; the live price is what matters
+        except Exception:
             intraday = None
+        try:  # Yahoo has no 4-hour interval: those are built from the 1-hour bars
+            hourly = source.history(period="3mo", interval="1h", auto_adjust=True)
+            hourly = hourly.dropna(subset=["Close"])
+        except Exception:
+            hourly = None
     bars = [] if intraday is None else [
-        {"time": idx.strftime("%H:%M"), "open": float(r.Open), "high": float(r.High),
-         "low": float(r.Low), "close": float(r.Close), "volume": float(r.Volume or 0)}
-        for idx, r in intraday.iterrows() if idx.date() == day
-    ]
+        _bar(idx, r, "%H:%M") for idx, r in intraday.iterrows() if idx.date() == day]
+    stamp = "%Y-%m-%d %H:%M"
+    bars_1h = [] if hourly is None or hourly.empty else [
+        _bar(idx, r, stamp) for idx, r in hourly.tail(HOURLY_BARS).iterrows()]
+    bars_4h = [] if hourly is None or hourly.empty else [
+        _bar(idx, r, stamp) for idx, r in four_hour(hourly).tail(FOUR_HOUR_BARS).iterrows()]
     price, prev_close = round(float(today.Close), 4), round(float(previous.Close), 4)
     return {
         "date": day.strftime("%Y-%m-%d"),
@@ -111,6 +145,8 @@ def live_session(ticker: str, now=None, bars: bool = True) -> dict | None:
         "change_pct": round((price / prev_close - 1) * 100, 2),
         "minutes_left": max(0, int((end - now).total_seconds() // 60)),
         "bars": bars,
+        "bars_1h": bars_1h,
+        "bars_4h": bars_4h,
     }
 
 

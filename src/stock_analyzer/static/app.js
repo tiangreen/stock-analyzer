@@ -814,7 +814,10 @@ async function loadStock() {
     s && converted ? `${fmt(s.close)} ${esc(d.currency)}` : "",
     d.candles.length ? esc(t("stock.asOf", { date: d.candles.at(-1).time })) : ""]
     .filter(Boolean).join(" · ");
-  if (d.candles.length) drawCharts(d);
+  // Always redraw: a ticker without stored sessions (e.g. listed today) must clear the
+  // previous stock's charts rather than leave them on screen.
+  drawCharts(d);
+  $("s-nohistory").hidden = d.candles.length > 0;
   renderAnalysis(d); renderIndicators(d); renderHistory(d);
   live.stock = { ticker: d.ticker, lastDate: d.candles.length ? d.candles.at(-1).time : null };
   if (live.result && live.result.ticker === d.ticker) showLive(); else refreshLive();
@@ -852,7 +855,7 @@ function showLive() {
     · ${esc(t("live.range", { low: money(q.low), high: money(q.high) }))}`;
   // Today's bar is not in the stored series (finished sessions only): draw it as it forms.
   const c = state.charts, s = live.stock;
-  if (c && s && s.ticker === r.ticker && s.lastDate && q.date > s.lastDate) {
+  if (c && s && s.ticker === r.ticker && (!s.lastDate || q.date > s.lastDate)) {
     const k = state.k;
     c.candles.update({ time: q.date, open: q.open * k, high: q.high * k, low: q.low * k, close: q.price * k });
     c.volume.update({ time: q.date, value: q.volume,

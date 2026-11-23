@@ -383,7 +383,8 @@ def live(ticker: str):
         except data.DataError as exc:
             raise HTTPException(502, str(exc)) from None
         if quote:
-            quote.pop("bars", None)
+            for key in ("bars", "bars_1h", "bars_4h"):
+                quote.pop(key, None)
         _live_cache[ticker] = (time.monotonic(), quote)
     return {"ticker": ticker, "open": quote is not None, "quote": quote}
 

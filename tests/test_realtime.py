@@ -30,6 +30,11 @@ class FakeTicker:
         if interval == "1d":
             return frame(pd.DatetimeIndex(["2026-11-10", "2026-11-11", "2026-11-12"], tz=TZ),
                          [100.0, 102.0, 105.06])
+        if interval == "1h":  # a 6-hour session yesterday, two hours of today so far
+            return frame(pd.DatetimeIndex(
+                [f"2026-11-11 {h:02d}:00" for h in range(9, 15)]
+                + ["2026-11-12 09:00", "2026-11-12 10:00"], tz=TZ),
+                [101.0, 101.5, 102.5, 101.8, 102.2, 102.0, 103.0, 105.06])
         return frame(pd.DatetimeIndex(["2026-11-12 09:00", "2026-11-12 09:15"], tz=TZ),
                      [103.0, 105.06])
 
@@ -43,6 +48,14 @@ def test_live_session_while_exchange_is_open(monkeypatch):
     assert live["change_pct"] == 3.0
     assert live["minutes_left"] == 270
     assert [b["time"] for b in live["bars"]] == ["09:00", "09:15"]
+    assert len(live["bars_1h"]) == 8 and live["bars_1h"][-1]["time"] == "2026-11-12 10:00"
+    # 4-hour blocks start at each session's open and never span the night.
+    four = live["bars_4h"]
+    assert [b["time"] for b in four] == ["2026-11-11 09:00", "2026-11-11 13:00", "2026-11-12 09:00"]
+    assert four[0]["open"] == 101.0 and four[0]["close"] == 101.8
+    assert four[0]["high"] == 103.5 and four[0]["low"] == 100.0 and four[0]["volume"] == 4000
+    assert four[1]["close"] == 102.0 and four[1]["volume"] == 2000
+    assert four[2]["open"] == 103.0 and four[2]["close"] == 105.06
 
 
 def test_no_live_session_after_the_close(monkeypatch):
@@ -155,7 +168,11 @@ def test_prompt_adds_the_live_session_only_in_realtime():
             "open": 108.0, "high": 110.0, "low": 107.5, "volume": 5000.0, "prev_close": 107.9,
             "change_pct": 1.48, "minutes_left": 270,
             "bars": [{"time": "09:00", "open": 108.0, "high": 109.0, "low": 107.5, "close": 108.8,
-                      "volume": 2000.0}]}
+                      "volume": 2000.0}],
+            "bars_1h": [{"time": "2026-11-12 09:00", "open": 108.0, "high": 109.2, "low": 107.5,
+                         "close": 109.1, "volume": 3000.0}],
+            "bars_4h": [{"time": "2026-11-11 13:00", "open": 106.0, "high": 108.1, "low": 105.5,
+                         "close": 107.9, "volume": 9000.0}]}
 
     daily = prompt.build("TEST", {}, prices, snap, [], [], HORIZONS)
     assert "as of the close on" in daily and "Live session" not in daily
@@ -164,6 +181,8 @@ def test_prompt_adds_the_live_session_only_in_realtime():
     assert "as of 2026-11-12 11:00 Asia/Tokyo time" in realtime
     assert "## Live session on 2026-11-12" in realtime
     assert "09:00,108.00,109.00,107.50,108.80,2000" in realtime
+    assert "1-hour bars" in realtime and "2026-11-12 09:00,108.00,109.20,107.50,109.10,3000" in realtime
+    assert "4-hour bars" in realtime and "2026-11-11 13:00,106.00,108.10,105.50,107.90,9000" in realtime
     assert "versus the live price of 109.5" in realtime
     assert "close to the live price" in realtime
     assert realtime.count('"minutes_left"') == 1  # the stored live block is not repeated

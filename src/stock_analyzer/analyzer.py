@@ -16,7 +16,8 @@ def analyze_ticker(ticker: str, provider_name: str, cfg: dict, force: bool = Fal
     """Analyze one ticker. Returns {'status': 'done'|'skipped', ...}; raises on failure.
 
     `realtime` analyzes during the trading session: the indicators still come from the
-    finished daily bars, and the model also gets the live price and today's bars so far.
+    finished daily bars, and the model also gets the live price, today's 15-minute bars
+    and recent 1-hour and 4-hour bars.
     Such an analysis is dated on the live session, stored beside the after-close one and
     never graded. It needs an open exchange."""
     ticker = data.normalize(ticker)
@@ -38,7 +39,7 @@ def analyze_ticker(ticker: str, provider_name: str, cfg: dict, force: bool = Fal
 
     snap = indicators.snapshot(indicators.compute(prices))
     if live:
-        snap["live"] = {k: v for k, v in live.items() if k != "bars"}
+        snap["live"] = {k: v for k, v in live.items() if not k.startswith("bars")}
     reference = live["price"] if live else float(prices["close"].iloc[-1])
 
     info = data.fetch_info(ticker)

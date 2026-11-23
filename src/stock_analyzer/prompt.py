@@ -69,10 +69,14 @@ def _live_section(live: dict) -> str:
     """Today's unfinished session (data.live_session) as a prompt section."""
     facts = {k: live[k] for k in ("price", "change_pct", "prev_close", "open", "high", "low",
                                   "volume", "minutes_left")}
-    lines = ["time,open,high,low,close,volume"]
-    for b in live.get("bars", []):
-        lines.append(f"{b['time']},{b['open']:.2f},{b['high']:.2f},{b['low']:.2f},"
-                     f"{b['close']:.2f},{int(b['volume'])}")
+
+    def table(key: str) -> str:
+        lines = ["time,open,high,low,close,volume"]
+        for b in live.get(key) or []:
+            lines.append(f"{b['time']},{b['open']:.2f},{b['high']:.2f},{b['low']:.2f},"
+                         f"{b['close']:.2f},{int(b['volume'])}")
+        return "\n".join(lines) if len(lines) > 1 else "None available."
+
     return f"""
 ## Live session on {live['date']} (unfinished; not part of the indicators and daily bars above)
 change_pct is against the previous close, minutes_left is the time until the regular close,
@@ -80,7 +84,14 @@ and the quote can be delayed by the exchange.
 {json.dumps(facts, ensure_ascii=False)}
 
 15-minute bars of this session so far:
-{chr(10).join(lines) if len(lines) > 1 else 'None available.'}
+{table("bars")}
+
+1-hour bars of the recent sessions, up to now (the last one can still be forming):
+{table("bars_1h")}
+
+4-hour bars of the recent sessions, up to now (built from the 1-hour bars, each session cut
+into blocks of four hours from its open; the last block of a session can be shorter):
+{table("bars_4h")}
 """
 
 
