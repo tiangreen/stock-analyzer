@@ -88,7 +88,8 @@ def test_saved_choices_override_config_file(temp_db):
     db.set_setting("models", {"claude": "opus", "bogus": "x"})
     db.set_setting("efforts", {"claude": "high"})
     cfg = config.load()
-    assert cfg["models"] == {"claude": "opus", "codex": file_default}
+    assert (cfg["models"]["claude"], cfg["models"]["codex"]) == ("opus", file_default)
+    assert "bogus" not in cfg["models"]
     assert cfg["efforts"]["claude"] == "high" and cfg["efforts"]["codex"] == ""
     db.set_setting("models", {"claude": ""})            # back to "CLI default"
     assert config.load()["models"]["claude"] == ""

@@ -50,8 +50,8 @@ async function refreshStatus() {
     select.dataset.lang = LANG;
     select.length = 0;
     for (const [name, p] of Object.entries(s.providers)) {
-      const label = PROVIDER_LABELS[name] || name;
-      select.add(new Option(p.installed ? label : t("provider.cliMissing", { label }), name));
+      const label = providerLabel(name, p);
+      select.add(new Option(p.installed || p.kind === "api" ? label : t("provider.cliMissing", { label }), name));
     }
   }
   if (document.activeElement !== select) select.value = s.provider;
@@ -139,6 +139,8 @@ $("language").addEventListener("change", async (e) => {
 // --- providers: sign-in, model and effort (Settings tab) ---------------------
 
 const PROVIDER_LABELS = { claude: "Claude (Anthropic)", codex: "GPT (Codex)" };
+// API providers (kind "api": key or token instead of a subscription sign-in) bring their label.
+const providerLabel = (name, p) => PROVIDER_LABELS[name] || (p && p.label) || name;
 // pending: provider -> {url, since}; errors: provider -> message
 const auth = { status: {}, pending: {}, errors: {}, custom: {} };
 
@@ -147,10 +149,12 @@ function renderAuth() {
   const s = auth.status[$("provider").value];
   const box = $("auth");
   if (!s) { box.innerHTML = ""; return; }
-  const choice = [s.model, s.effort].filter(Boolean).join(" · ");
+  const api = s.kind === "api";
+  const choice = [s.model || (api ? s.default_model : ""), s.effort].filter(Boolean).join(" · ");
+  const todo = api ? "auth.setUp" : s.installed ? "auth.signIn" : "auth.notInstalled";
   box.innerHTML = (s.logged_in
-    ? `<span class="badge hit" title="${esc(s.detail)}">${esc(t("auth.signedIn"))}</span>`
-    : `<button id="open-settings">${esc(t(s.installed ? "auth.signIn" : "auth.notInstalled"))}</button>`)
+    ? `<span class="badge hit" title="${esc(s.detail)}">${esc(t(api ? "auth.ready" : "auth.signedIn"))}</span>`
+    : `<button id="open-settings" title="${esc(s.detail)}">${esc(t(todo))}</button>`)
     + (choice ? ` <span class="muted">${esc(choice)}</span>` : "");
 }
 
@@ -166,6 +170,11 @@ function effortsFor(p, model) {
 function authControls(name, p) {
   const pending = auth.pending[name];
   const error = auth.errors[name] ? `<span class="error">${esc(auth.errors[name])}</span>` : "";
+  if (p.kind === "api") {   // nothing to sign in to: the secret comes from the environment
+    return p.logged_in
+      ? `<span class="muted">${esc(p.detail)}</span> ${error}`
+      : `<span class="error">${esc(p.detail)}</span> <span class="muted">${esc(p.hint)}</span> ${error}`;
+  }
   if (!p.installed) return `<span class="error">${esc(t("auth.cliMissing", { name }))}</span>`;
   if (pending && !p.logged_in) {
     const link = pending.url && pending.url.startsWith("https://")
@@ -184,13 +193,16 @@ function renderSettings() {
     const listed = p.models.some((m) => m.id === p.model);
     const custom = auth.custom[name] || (p.model !== "" && !listed);
     const efforts = effortsFor(p, p.model);
+    const api = p.kind === "api";
+    const first = !api ? t("settings.cliDefault")
+      : p.default_model ? t("settings.apiDefault", { model: p.default_model }) : t("settings.pickModel");
     const option = (value, label, selected) =>
       `<option value="${esc(value)}"${selected ? " selected" : ""}>${esc(label)}</option>`;
     return `
     <div class="card provider" data-provider="${esc(name)}">
       <div class="analysis-head">
-        <strong>${esc(PROVIDER_LABELS[name] || name)}</strong>
-        <span class="badge ${p.logged_in ? "hit" : "miss"}">${esc(p.installed ? p.detail : t("auth.notInstalled"))}</span>
+        <strong>${esc(providerLabel(name, p))}</strong>
+        <span class="badge ${p.logged_in ? "hit" : "miss"}">${esc(api ? t(p.logged_in ? "auth.ready" : "auth.notReady") : p.installed ? p.detail : t("auth.notInstalled"))}</span>
         <label class="use"><input type="radio" name="active-provider" ${p.active ? "checked" : ""}> ${esc(t("settings.use"))}</label>
       </div>
       <div class="field"><span class="field-name">${esc(t("settings.authorization"))}</span>
@@ -198,7 +210,7 @@ function renderSettings() {
       <div class="field"><span class="field-name">${esc(t("settings.model"))}</span>
         <div class="field-body">
           <select class="p-model">
-            ${option("", t("settings.cliDefault"), !custom && p.model === "")}
+            ${option("", first, !custom && p.model === "")}
             ${p.models.map((m) => option(m.id, m.label === m.id ? m.id : `${m.label} (${m.id})`, !custom && m.id === p.model)).join("")}
             ${option("__custom__", t("settings.custom"), custom)}
           </select>
@@ -211,7 +223,7 @@ function renderSettings() {
             ${option("", t("settings.default"), p.effort === "")}
             ${efforts.map((e) => option(e, e, e === p.effort)).join("")}
           </select>
-          <span class="muted">${esc(t("settings.effortHint"))}</span>
+          <span class="muted">${esc(t(api ? "settings.effortHintApi" : "settings.effortHint"))}</span>
         </div></div>
     </div>`;
   });
@@ -802,7 +814,10 @@ async function loadStock() {
     s && converted ? `${fmt(s.close)} ${esc(d.currency)}` : "",
     d.candles.length ? esc(t("stock.asOf", { date: d.candles.at(-1).time })) : ""]
     .filter(Boolean).join(" · ");
-  if (d.candles.length) drawCharts(d);
+  // Always redraw: a ticker without stored sessions (e.g. listed today) must clear the
+  // previous stock's charts rather than leave them on screen.
+  drawCharts(d);
+  $("s-nohistory").hidden = d.candles.length > 0;
   renderAnalysis(d); renderIndicators(d); renderHistory(d);
   live.stock = { ticker: d.ticker, lastDate: d.candles.length ? d.candles.at(-1).time : null };
   if (live.result && live.result.ticker === d.ticker) showLive(); else refreshLive();
@@ -840,7 +855,7 @@ function showLive() {
     · ${esc(t("live.range", { low: money(q.low), high: money(q.high) }))}`;
   // Today's bar is not in the stored series (finished sessions only): draw it as it forms.
   const c = state.charts, s = live.stock;
-  if (c && s && s.ticker === r.ticker && s.lastDate && q.date > s.lastDate) {
+  if (c && s && s.ticker === r.ticker && (!s.lastDate || q.date > s.lastDate)) {
     const k = state.k;
     c.candles.update({ time: q.date, open: q.open * k, high: q.high * k, low: q.low * k, close: q.price * k });
     c.volume.update({ time: q.date, value: q.volume,

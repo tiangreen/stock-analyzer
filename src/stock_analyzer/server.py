@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from . import (analyzer, config, data, db, discovery, fx, indicators, runner, scheduler, scoring,
                signals, tradingview)
-from .llm import PROVIDERS, LLMError
+from .llm import PROVIDERS, LLMError, get_provider
 from .llm.base import cancel_login, submit_login_code
 
 STATIC = Path(__file__).parent / "static"
@@ -83,8 +83,9 @@ def _same_origin(request: Request) -> None:
 
 
 def _provider(name: str | None) -> str:
-    name = name or config.load()["provider"]
-    if name not in PROVIDERS:
+    cfg = config.load()
+    name = name or cfg["provider"]
+    if name not in config.provider_names(cfg):
         raise HTTPException(400, f"Unknown provider '{name}'")
     return name
 
@@ -118,8 +119,9 @@ def status():
         "currencies": list(config.DISPLAY_CURRENCIES),
         "language": cfg["language"],
         "languages": list(config.LANGUAGES),
-        "providers": {n: {"installed": cls().available(), "model": cfg["models"].get(n) or "default"}
-                      for n, cls in PROVIDERS.items()},
+        "providers": {n: {"installed": p.available(), "kind": p.kind, "label": p.label,
+                          "model": cfg["models"].get(n) or p.default_model or "default"}
+                      for n, p in _providers(cfg).items()},
         "horizons": cfg["horizons"],
         "running": runner.is_running(),
         "discovering": bool(runner.is_running() and last and last["status"] == "running"
@@ -189,11 +191,16 @@ AUTH_TTL = 60
 _auth_cache: dict[str, tuple[float, dict]] = {}
 
 
+def _providers(cfg: dict) -> dict:
+    """Every provider of this config: the subscription CLIs, then the API providers."""
+    return {n: get_provider(n, cfg=cfg) for n in config.provider_names(cfg)}
+
+
 def _auth(name: str, refresh: bool = False) -> dict:
     cached = _auth_cache.get(name)
     if cached and not refresh and time.monotonic() - cached[0] < AUTH_TTL:
         return cached[1]
-    status = PROVIDERS[name]().login_status()
+    status = get_provider(name).login_status()
     _auth_cache[name] = (time.monotonic(), status)
     return status
 
@@ -203,10 +210,13 @@ def providers(refresh: bool = False):
     """Sign-in state plus the model and effort choices of every provider."""
     cfg = config.load()
     out = {}
-    for name, cls in PROVIDERS.items():
-        provider = cls()
+    for name, provider in _providers(cfg).items():
         out[name] = {
             **_auth(name, refresh),
+            "kind": provider.kind,                  # "cli" (subscription) or "api" (key or token)
+            "label": provider.label,
+            "default_model": provider.default_model,
+            "hint": provider.login_hint if provider.kind == "api" else "",
             "active": cfg["provider"] == name,
             "model": cfg["models"].get(name, ""),
             "effort": cfg["efforts"].get(name, ""),
@@ -227,7 +237,7 @@ def put_provider(name: str, body: ChoiceIn):
     name = _provider(name)
     model, effort = body.model.strip(), body.effort.strip()
     try:
-        PROVIDERS[name]().check_choice(model, effort)
+        get_provider(name).check_choice(model, effort)
     except LLMError as exc:
         raise HTTPException(400, str(exc)) from None
     saved = db.get_settings()
@@ -240,7 +250,7 @@ def put_provider(name: str, body: ChoiceIn):
 def provider_login(name: str, request: Request):
     """Start the provider's browser sign-in and return its authorize page URL."""
     _same_origin(request)
-    provider = PROVIDERS[_provider(name)]()
+    provider = get_provider(_provider(name))
     try:
         started = provider.start_login()
     except LLMError as exc:
@@ -373,7 +383,8 @@ def live(ticker: str):
         except data.DataError as exc:
             raise HTTPException(502, str(exc)) from None
         if quote:
-            quote.pop("bars", None)
+            for key in ("bars", "bars_1h", "bars_4h"):
+                quote.pop(key, None)
         _live_cache[ticker] = (time.monotonic(), quote)
     return {"ticker": ticker, "open": quote is not None, "quote": quote}
 

@@ -44,8 +44,9 @@ The MIT License grants no rights to any of the following.
   belongs to Yahoo and its providers and is subject to Yahoo's terms, which limit it to
   personal use. Do not redistribute the data, including a `data/analyzer.db` filled with it.
 - **Language models.** Analyses come from Anthropic and OpenAI models reached through the
-  `claude` and `codex` command-line tools under your own subscription. Your use is governed by
-  those providers' terms. This project is not affiliated with either company.
+  `claude` and `codex` command-line tools under your own subscription, or from any model API
+  you configure with your own key or client credentials. Your use is governed by those
+  providers' terms. This project is not affiliated with any of them.
 - **TradingView.** "Open in TradingView" only links to tradingview.com; no TradingView data is
   used.
 
