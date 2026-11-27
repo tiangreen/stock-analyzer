@@ -221,3 +221,23 @@ def test_live_quote_skips_intraday_bars(monkeypatch):
     monkeypatch.setattr(data.yf, "Ticker", Counting)
     quote = data.live_session("7203.T", now=pd.Timestamp("2026-11-12 11:00", tz=TZ), bars=False)
     assert quote["price"] == 105.06 and quote["bars"] == [] and asked == ["1d"]
+
+
+def test_intraday_chart_bars(monkeypatch, temp_db):
+    import json
+    monkeypatch.setattr(data.yf, "Ticker", FakeTicker)
+    # Times are the exchange's wall clock read as UTC, so the chart shows Tokyo time.
+    hourly = data.intraday("7203.T", "1h")
+    assert len(hourly) == 8
+    assert hourly["date"].iloc[0] == int(pd.Timestamp("2026-11-11 09:00", tz="UTC").timestamp())
+    four = data.intraday("7203.T", "4h")
+    assert list(four["close"]) == [101.8, 102.0, 105.06]
+
+    server._intraday_cache.clear()
+    db.add_ticker("TEST", {})
+    out = server.intraday("TEST", "4h")
+    json.dumps(out)  # plain JSON types, not numpy scalars
+    assert out["timeframe"] == "4h" and len(out["candles"]) == 3
+    assert set(out["series"]) == set(server.CHART_SERIES)
+    with pytest.raises(server.HTTPException):
+        server.intraday("TEST", "2h")

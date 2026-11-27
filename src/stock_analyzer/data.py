@@ -84,6 +84,37 @@ def four_hour(hourly: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+# Chart timeframes below one day: Yahoo interval and history period. Each period gives a few
+# hundred bars, enough for the 200-bar average; 4-hour bars are built from the 1-hour ones.
+INTRADAY = {"15m": ("15m", "1mo"), "1h": ("1h", "6mo"), "4h": ("1h", "1y")}
+
+
+def intraday(ticker: str, timeframe: str) -> pd.DataFrame:
+    """Recent intraday bars for the chart, with date/open/high/low/close/volume columns.
+    `date` is the bar's start in the exchange's own wall-clock time, as Unix seconds read as
+    UTC, so a chart shows exchange time whatever the viewer's zone. The last bar can still
+    be forming. Read straight from Yahoo; empty when Yahoo has none."""
+    interval, period = INTRADAY[timeframe]
+    try:
+        bars = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=True)
+    except Exception as exc:
+        raise DataError(f"{ticker}: download failed ({exc})") from exc
+    columns = ["date", "open", "high", "low", "close", "volume"]
+    if bars is None or bars.empty:
+        return pd.DataFrame(columns=columns)
+    bars = bars.dropna(subset=["Close"])
+    if timeframe == "4h":
+        bars = four_hour(bars)
+    index = pd.DatetimeIndex(bars.index)
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    seconds = (index - pd.Timestamp("1970-01-01")) // pd.Timedelta(seconds=1)
+    return pd.DataFrame({"date": seconds.astype("int64"), "open": bars["Open"].to_numpy(float),
+                         "high": bars["High"].to_numpy(float), "low": bars["Low"].to_numpy(float),
+                         "close": bars["Close"].to_numpy(float),
+                         "volume": bars["Volume"].fillna(0).to_numpy(float)})[columns]
+
+
 def live_session(ticker: str, now=None, bars: bool = True) -> dict | None:
     """The exchange's current, unfinished session: the live price, today's bar so far, its
     15-minute bars, and recent 1-hour and 4-hour bars up to now, in the exchange's own time.

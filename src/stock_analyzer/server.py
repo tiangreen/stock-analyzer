@@ -353,13 +353,45 @@ def stock(ticker: str):
                "signal_limits": config.load()["signals"]}
     if len(prices) >= 2:
         ind = indicators.compute(prices)
-        payload["candles"] = [
-            {"time": r.date, "open": r.open, "high": r.high, "low": r.low, "close": r.close}
-            for r in prices.itertuples()]
-        payload["volume"] = [{"time": r.date, "value": r.volume, "up": r.close >= r.open}
-                             for r in prices.itertuples()]
-        payload["series"] = {c: _series(ind, c) for c in CHART_SERIES}
+        payload.update(_chart(prices, ind))
         payload["snapshot"] = indicators.snapshot(ind)
+    return payload
+
+
+def _chart(prices, ind) -> dict:
+    """Candles, volume and indicator lines of a price frame, as the stock page draws them."""
+    return {"candles": [{"time": r.date, "open": r.open, "high": r.high, "low": r.low,
+                         "close": r.close} for r in prices.itertuples()],
+            "volume": [{"time": r.date, "value": r.volume, "up": r.close >= r.open}
+                       for r in prices.itertuples()],
+            "series": {c: _series(ind, c) for c in CHART_SERIES}}
+
+
+INTRADAY_TTL = 10  # seconds; the chart refreshes with the live price
+_intraday_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+@app.get("/api/intraday/{ticker}")
+def intraday(ticker: str, timeframe: str = "1h"):
+    """Intraday candles (15m, 1h or 4h) with indicators computed on those bars, for the
+    stock page's chart timeframe toggle. Times are the exchange's wall clock as Unix seconds."""
+    ticker = _ticker(ticker)
+    if timeframe not in data.INTRADAY:
+        raise HTTPException(400, f"Unknown timeframe {timeframe!r}")
+    if db.one("SELECT 1 AS x FROM watchlist WHERE ticker = ?", (ticker,)) is None:
+        raise HTTPException(404, "Ticker is not on the watchlist")
+    key = (ticker, timeframe)
+    cached = _intraday_cache.get(key)
+    if cached and time.monotonic() - cached[0] < INTRADAY_TTL:
+        return cached[1]
+    try:
+        prices = data.intraday(ticker, timeframe)
+    except data.DataError as exc:
+        raise HTTPException(502, str(exc)) from None
+    payload = {"ticker": ticker, "timeframe": timeframe, "candles": [], "volume": [], "series": {}}
+    if len(prices):
+        payload.update(_chart(prices, indicators.compute(prices)))
+    _intraday_cache[key] = (time.monotonic(), payload)
     return payload
 
 
@@ -538,7 +570,17 @@ def index():
     return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
 
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+class _Revalidated(StaticFiles):
+    """Static files the browser rechecks on every load (a cheap 304 when unchanged), so an
+    update never runs a cached app.js against a newer index.html."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", _Revalidated(directory=STATIC), name="static")
 
 
 def _listening(host: str, port: int) -> bool:
