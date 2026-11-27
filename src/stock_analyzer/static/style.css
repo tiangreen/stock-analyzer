@@ -92,6 +92,10 @@ td.reason { min-width: 260px; white-space: normal; color: var(--muted); }
 .stock-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
 .stock-actions { display: flex; gap: 8px; }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.legend { align-items: center; flex-wrap: wrap; }
+.timeframes { display: inline-flex; gap: 4px; }
+.timeframes button { padding: 1px 8px; font-size: 12px; }
+.timeframes button.active { border-color: var(--accent); color: var(--accent); }
 .legend i { display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; }
 .chart { height: 380px; }
 .chart.small { height: 130px; }

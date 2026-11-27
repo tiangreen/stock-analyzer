@@ -521,9 +521,12 @@ function buildCharts() {
   return c;
 }
 
-function drawCharts(d) {
+// `keepRange` leaves the zoom and scroll alone: an intraday chart refreshing with the live price.
+function drawCharts(d, keepRange = false) {
   const c = state.charts || (state.charts = buildCharts());
-  for (const chart of c.all) chart.applyOptions({ localization: { locale: LOCALES[LANG] } });
+  const intraday = state.tf !== "1d";
+  for (const chart of c.all) chart.applyOptions({ localization: { locale: LOCALES[LANG] },
+    timeScale: { timeVisible: intraday, secondsVisible: false } });
   // Pad indicator series with empty points so all panes share one time axis.
   const k = state.k;
   const pad = (series, scale = true) => {
@@ -547,7 +550,7 @@ function drawCharts(d) {
 
   for (const l of c.levels) c.candles.removePriceLine(l);
   c.levels = [];
-  const a = d.analyses[0];
+  const a = (d.analyses || (state.daily && state.daily.analyses) || [])[0];
   if (a) {
     for (const [key, color] of [["support", "#2ebd85"], ["resistance", "#f6465d"]]) {
       if (a[key]) c.levels.push(c.candles.createPriceLine(
@@ -555,8 +558,55 @@ function drawCharts(d) {
     }
   }
   const n = d.candles.length;
+  if (keepRange) return;
   c.all[0].timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 180), to: n + 3 });
 }
+
+// --- chart timeframe ------------------------------------------------------------
+// 1D draws the stored daily sessions; 4H, 1H and 15m load intraday bars from Yahoo, with the
+// indicators computed on those bars. The choice is remembered.
+
+const TIMEFRAMES = ["1d", "4h", "1h", "15m"];
+state.tf = "1d";
+try {
+  const saved = localStorage.getItem("chartTimeframe");
+  if (TIMEFRAMES.includes(saved)) state.tf = saved;
+} catch {}
+let intradayLoad = 0;
+
+function showTimeframes(note = "") {
+  for (const b of document.querySelectorAll(".timeframe")) b.classList.toggle("active", b.dataset.tf === state.tf);
+  $("tf-note").textContent = note;
+}
+
+async function loadIntraday(keepRange = false) {
+  const ticker = state.ticker, tf = state.tf, label = tf.toUpperCase().replace("M", "m");
+  const load = ++intradayLoad;
+  if (!keepRange) showTimeframes(t("chart.loading", { tf: label }));
+  let d;
+  try {
+    d = await api(`/api/intraday/${encodeURIComponent(ticker)}?timeframe=${tf}`);
+  } catch {
+    if (load === intradayLoad && !keepRange) showTimeframes(t("chart.failed", { tf: label }));
+    return;
+  }
+  if (load !== intradayLoad || state.ticker !== ticker || state.tf !== tf) return;
+  showTimeframes(d.candles.length ? t("chart.exchangeTime") : t("chart.empty", { tf: label }));
+  drawCharts(d, keepRange && d.candles.length > 0);
+}
+
+for (const b of document.querySelectorAll(".timeframe")) {
+  b.addEventListener("click", () => {
+    if (b.dataset.tf === state.tf) return;
+    state.tf = b.dataset.tf;
+    try { localStorage.setItem("chartTimeframe", state.tf); } catch {}
+    if (!state.daily) { showTimeframes(); return; }
+    $("s-nohistory").hidden = state.daily.candles.length > 0 || state.tf !== "1d";
+    if (state.tf === "1d") { intradayLoad++; showTimeframes(); drawCharts(state.daily); showLive(); }
+    else loadIntraday();
+  });
+}
+showTimeframes();
 
 // --- trade signals ----------------------------------------------------------
 
@@ -816,8 +866,9 @@ async function loadStock() {
     .filter(Boolean).join(" · ");
   // Always redraw: a ticker without stored sessions (e.g. listed today) must clear the
   // previous stock's charts rather than leave them on screen.
-  drawCharts(d);
-  $("s-nohistory").hidden = d.candles.length > 0;
+  state.daily = d;
+  if (state.tf === "1d") drawCharts(d); else loadIntraday();
+  $("s-nohistory").hidden = d.candles.length > 0 || state.tf !== "1d";
   renderAnalysis(d); renderIndicators(d); renderHistory(d);
   live.stock = { ticker: d.ticker, lastDate: d.candles.length ? d.candles.at(-1).time : null };
   if (live.result && live.result.ticker === d.ticker) showLive(); else refreshLive();
@@ -855,7 +906,7 @@ function showLive() {
     · ${esc(t("live.range", { low: money(q.low), high: money(q.high) }))}`;
   // Today's bar is not in the stored series (finished sessions only): draw it as it forms.
   const c = state.charts, s = live.stock;
-  if (c && s && s.ticker === r.ticker && (!s.lastDate || q.date > s.lastDate)) {
+  if (state.tf === "1d" && c && s && s.ticker === r.ticker && (!s.lastDate || q.date > s.lastDate)) {
     const k = state.k;
     c.candles.update({ time: q.date, open: q.open * k, high: q.high * k, low: q.low * k, close: q.price * k });
     c.volume.update({ time: q.date, value: q.volume,
@@ -870,6 +921,8 @@ async function refreshLive() {
   try {
     const result = await api(`/api/live/${encodeURIComponent(ticker)}`);
     if (state.ticker === ticker) { live.result = result; live.failed = false; }
+    // Intraday charts follow the live price: reload their bars, keeping the zoom.
+    if (state.ticker === ticker && state.tf !== "1d" && result.open) loadIntraday(true);
   } catch {
     if (state.ticker === ticker) { live.result = null; live.failed = true; }
   } finally {
